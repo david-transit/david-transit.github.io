@@ -251,3 +251,13 @@ body.cp-open{overflow:hidden}
 .trust-hint{margin:4px 30px 0 0;font-size:14px;color:var(--ys-muted);text-align:right}
 .dlg-step{width:min(440px,94vw)}
 .dlg-step .field input{max-width:200px;letter-spacing:.2em;font-size:20px}
+
+/* personal devices list (my security) */
+.dev-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.dev{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--ys-line);border-radius:8px;padding:10px 12px;flex-wrap:wrap}
+.dev-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dev-main b{font-size:16px}
+.dev-user{font-size:15px}
+.dev-meta{color:var(--ys-muted);font-size:14px}
+.sec h4{margin:16px 0 4px}
+.dev-main .chip{align-self:flex-start}

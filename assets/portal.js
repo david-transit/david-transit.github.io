@@ -21,6 +21,7 @@ const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localSt
 // has no idle sign-out until then. The tools read the same keys. Sign-out clears the mark.
 const trustUntil = () => { const t = +lsGet(TRUST) || 0; return t > Date.now() ? t : 0 };
 const idleMs = () => trustUntil() ? Infinity : IDLE_MIN * 6e4;
+if (!lsGet(SKEY)) lsSet(TRUST, null); // no session (signed out, or disconnected from another device): no mark either
 
 // ---------- session ----------
 let SES = null; try { SES = JSON.parse(lsGet(SKEY) || "null") } catch { }
@@ -202,7 +203,10 @@ $("#gateForm").addEventListener("submit", async e => {
       const user = $("#gUser").value.trim().toLowerCase(), pw = $("#gpw").value; $("#gUser").value = user;
       if (!user || !pw) throw new Error("invalid_credentials");
       const trust = !!$("#gTrust")?.checked;
-      await signIn(user, pw); lsSet(TRUST, trust ? String(Date.now() + TRUST_H * 36e5) : null); await unlock();
+      await signIn(user, pw); lsSet(TRUST, null);
+      // personal device: recorded on the server for this session (listed and disconnectable in the control panel)
+      if (trust) try { const r = await fnAuth({ action: "trust_device", hours: TRUST_H }); lsSet(TRUST, String(Date.parse(r.expires_at))) } catch (e) { console.warn("trust_device", e) }
+      await unlock();
     } else if (GMODE === "finish") { location.assign(DEADHEAD) }
     else if (GMODE === "noaccess") { await signOut(); gateMode("login") }
   } catch (err) {

@@ -311,7 +311,10 @@ let SEC = null, ENRL = null, CODES = null;
 async function drawSec() {
   const box = $("#cpBody"); box.innerHTML = '<p class="cp-empty">טוען…</p>';
   // recovery settings (platform admins) are sensitive: shown only in an aal2 session (manage_users enforces it too)
-  try { SEC = { on: (await myFactors()).some(f => f.status === "verified"), rec: PLATFORM ? (aal() === "aal2" ? await fnAuth({ action: "my_security" }) : { locked: true }) : null } }
+  try {
+    SEC = { on: (await myFactors()).some(f => f.status === "verified"), rec: PLATFORM ? (aal() === "aal2" ? await fnAuth({ action: "my_security" }) : { locked: true }) : null };
+    await loadDevices();
+  }
   catch (e) { box.innerHTML = `<p class="msg err">${esc(errText(e))}</p>`; return }
   secRender();
 }
@@ -324,7 +327,8 @@ function secRender() {
         ${pwIn("sPw2", "אימות הסיסמה החדשה", "new-password")}
         <button class="btn-blue">שמירת הסיסמה</button> <span class="msg" id="sPwMsg" aria-live="polite"></span></form></section>
     <section class="sec" aria-labelledby="sMfaH"><h3 id="sMfaH">אימות דו־שלבי</h3><div id="sMfa">${mfaHtml()}</div></section>
-    <section class="sec" aria-labelledby="sTrH"><h3 id="sTrH">המכשיר הזה</h3><div id="sTr">${trustHtml()}</div></section>
+    <section class="sec" aria-labelledby="sTrH"><h3 id="sTrH">מכשירים אישיים</h3><div id="sTr">${trustHtml()}</div></section>
+    ${PLATFORM ? `<section class="sec" aria-labelledby="sAllH"><h3 id="sAllH">מכשירים אישיים של כל המשתמשים (מנהל מערכת)</h3><div id="sAll">${allDevHtml()}</div></section>` : ""}
     ${r ? `<section class="sec" aria-labelledby="sRecH"><h3 id="sRecH">שחזור חשבון (מנהל מערכת)</h3><div id="sRec">${recHtml()}</div></section>` : ""}`;
 }
 function mfaHtml() {
@@ -340,13 +344,42 @@ function mfaHtml() {
       <button type="button" class="btn-blue" id="sMfaOn">הפעלה</button> <span class="msg" id="sMfaMsg" aria-live="polite"></span>`;
 }
 const whenHe = t => new Date(t).toLocaleString("he-IL", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+// personal devices: one Auth session each, recorded on the server (manage_users: trust_device / my_devices / revoke_device).
+// Disconnect deletes the session on the server: that device's next request is refused (RLS + GoTrue).
+function uaName(ua) {
+  ua = String(ua || "");
+  const b = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /SamsungBrowser/.test(ua) ? "Samsung Internet" : /CriOS|Chrome\//.test(ua) ? "Chrome"
+    : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "דפדפן לא מזוהה";
+  const o = /Windows/.test(ua) ? "Windows" : /Android/.test(ua) ? "Android" : /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "מערכת לא מזוהה";
+  return `${b} · ${o}`;
+}
+async function loadDevices() {
+  try { SEC.devs = (await fnAuth({ action: "my_devices" })).devices || [] } catch (e) { SEC.devs = null; SEC.devErr = errText(e) }
+  if (SEC.devs) { const cur = SEC.devs.find(d => d.current); lsSet(TRUST, cur ? String(Date.parse(cur.expires_at)) : null) } // the server decides
+  SEC.all = PLATFORM && aal() === "aal2" ? await fnAuth({ action: "all_devices" }).then(r => r.devices || [], () => null) : null;
+}
+const devRows = (list, withUser) => `<div class="dev-list" role="list">${list.map(d => `<div class="dev" role="listitem" data-sid="${esc(d.session_id)}">
+    <div class="dev-main"><b>${esc(uaName(d.user_agent))}</b>${d.current ? ' <span class="chip chip-plat">המכשיר הזה</span>' : ""}
+      ${withUser ? `<span class="dev-user">${esc(d.display_name || d.username || "")} <span dir="ltr" class="muted">${esc(d.username || "")}</span></span>` : ""}
+      <span class="dev-meta">סומן ${esc(whenHe(d.marked_at))} · שימוש אחרון ${esc(whenHe(d.last_used))} · בתוקף עד ${esc(whenHe(d.expires_at))}</span></div>
+    <button type="button" class="btn-line small danger" data-revoke="${esc(d.session_id)}" data-who="${esc(withUser ? d.username || "" : "")}" data-cur="${d.current ? 1 : ""}">${d.current ? "ניתוק המכשיר הזה" : "ניתוק"}</button></div>`).join("")}</div>`;
 function trustHtml() {
   const t = trustUntil();
-  return t ? `<p><b>מסומן כמכשיר אישי</b> עד ${esc(whenHe(t))}. עד אז החשבון נשאר מחובר גם בלי פעילות (במקום ניתוק אחרי ${IDLE_MIN} דקות).</p>
-      <button type="button" class="btn-line" id="sTrustOff">ביטול סימון המכשיר</button> <span class="msg" id="sTrMsg" aria-live="polite"></span>`
-    : `<p>לא מסומן כמכשיר אישי: אחרי ${IDLE_MIN} דקות בלי פעילות החשבון מתנתק.</p>
+  const head = t ? `<p><b>המכשיר הזה מסומן כאישי</b> עד ${esc(whenHe(t))}. עד אז החשבון נשאר מחובר גם בלי פעילות (במקום ניתוק אחרי ${IDLE_MIN} דקות).</p>
+      <button type="button" class="btn-line" id="sTrustOff">ביטול סימון המכשיר</button>`
+    : `<p>המכשיר הזה לא מסומן כאישי: אחרי ${IDLE_MIN} דקות בלי פעילות החשבון מתנתק.</p>
       <p class="hint">רק במכשיר אישי עם נעילת מסך. במחשב משותף לא לסמן.</p>
-      <button type="button" class="btn-line" id="sTrustOn">סימון כמכשיר אישי ל־${trustLabel()}</button> <span class="msg" id="sTrMsg" aria-live="polite"></span>`;
+      <button type="button" class="btn-line" id="sTrustOn">סימון כמכשיר אישי ל־${trustLabel()}</button>`;
+  const others = SEC.devs == null ? `<p class="msg err">${esc(SEC.devErr || "")}</p>`
+    : SEC.devs.length ? `<h4>המכשירים האישיים שלך</h4><p class="hint">ניתוק מנתק את המכשיר מיד, גם בשרת: בפעם הבאה שהוא פונה לשרת הוא יתבקש להיכנס מחדש.</p>${devRows(SEC.devs, false)}`
+    : '<p class="hint">אין לך מכשירים מסומנים כאישיים.</p>';
+  return `${head} <span class="msg" id="sTrMsg" aria-live="polite"></span>${others}`;
+}
+function allDevHtml() {
+  if (SEC.all == null) return aal() === "aal2" ? '<p class="msg err">לא ניתן לטעון את הרשימה</p>'
+    : SEC.on ? '<p class="hint">כדי לראות ולנתק מכשירים של משתמשים אחרים צריך להקליד קוד אימות.</p><button type="button" class="btn-line" id="sAllUnlock">הקלדת קוד</button> <span class="msg" id="sAllMsg" aria-live="polite"></span>'
+    : '<p class="hint">קודם צריך להפעיל אימות דו־שלבי (למעלה).</p>';
+  return (SEC.all.length ? devRows(SEC.all, true) : '<p class="hint">אין מכשירים מסומנים.</p>') + ' <span class="msg" id="sAllMsg" aria-live="polite"></span>';
 }
 function recHtml() {
   const r = SEC.rec;
@@ -410,9 +443,32 @@ $("#cpBody").addEventListener("click", async e => {
     return;
   }
   if (id === "sTrustOff" || id === "sTrustOn") {
-    lsSet(TRUST, id === "sTrustOn" ? String(Date.now() + TRUST_H * 36e5) : null); $("#sTr").innerHTML = trustHtml();
-    smsg("sTrMsg", id === "sTrustOn" ? `המכשיר סומן כאישי ל־${trustLabel()}` : `הסימון בוטל. מעכשיו ניתוק אחרי ${IDLE_MIN} דקות בלי פעילות`, "ok");
-    $(id === "sTrustOn" ? "#sTrustOff" : "#sTrustOn").focus(); return;
+    smsg("sTrMsg", "שומר…");
+    try {
+      if (id === "sTrustOn") { const r = await fnAuth({ action: "trust_device", hours: TRUST_H }); lsSet(TRUST, String(Date.parse(r.expires_at))) }
+      else { await fnAuth({ action: "untrust_device" }); lsSet(TRUST, null) }
+      await loadDevices(); $("#sTr").innerHTML = trustHtml(); if ($("#sAll")) $("#sAll").innerHTML = allDevHtml();
+      smsg("sTrMsg", id === "sTrustOn" ? `המכשיר סומן כאישי ל־${trustLabel()}` : `הסימון בוטל. מעכשיו ניתוק אחרי ${IDLE_MIN} דקות בלי פעילות`, "ok");
+      $(id === "sTrustOn" ? "#sTrustOff" : "#sTrustOn")?.focus();
+    } catch (err) { smsg("sTrMsg", errText(err), "err") }
+    return;
+  }
+  if (id === "sAllUnlock") {
+    try { if (await stepUp() !== "ok") return; await loadDevices(); $("#sAll").innerHTML = allDevHtml() } catch (err) { smsg("sAllMsg", errText(err), "err") }
+    return;
+  }
+  const rv = e.target.closest("[data-revoke]");
+  if (rv) {
+    const cur = !!rv.dataset.cur, who = rv.dataset.who, box = rv.closest("#sAll") ? "sAllMsg" : "sTrMsg";
+    if (!confirm(cur ? "לנתק את המכשיר הזה? תצטרך להיכנס מחדש." : `לנתק את המכשיר${who ? " של " + who : ""}? הוא יתבקש להיכנס מחדש בפעם הבאה שהוא פונה לשרת.`)) return;
+    smsg(box, "מנתק…");
+    try {
+      await fnAuth({ action: "revoke_device", session_id: rv.dataset.revoke });
+      if (cur) { setSes(null); lsSet(TRUST, null); location.replace("/"); return }
+      await loadDevices(); $("#sTr").innerHTML = trustHtml(); if ($("#sAll")) $("#sAll").innerHTML = allDevHtml();
+      smsg(box, "המכשיר נותק", "ok");
+    } catch (err) { smsg(box, errText(err), "err") }
+    return;
   }
   if (!["sEmSave", "sEmDel", "sGen"].includes(id)) return;
   const pw = $("#sSecPw").value; if (!pw) { smsg("sRecMsg", "צריך להקליד את הסיסמה הנוכחית", "err"); $("#sSecPw").focus(); return }
