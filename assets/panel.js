@@ -111,7 +111,7 @@ function drawUsers() {
         <span role="cell" class="cp-name"><b>${esc(u.display_name || u.username)}${u.me ? ' <span class="muted small">(אתה)</span>' : ""}</b><span dir="ltr">${esc(u.username)}</span></span>
         <span role="cell" class="cp-acc">${accessOf(u)}</span>
         <span role="cell" class="cp-st">${statusOf(u)}</span>
-        <span role="cell" class="cp-act">${u.manageable ? `<button type="button" class="dots" data-menu aria-haspopup="true" aria-expanded="false" aria-label="פעולות על ${esc(u.username)}">⋯</button>` : ""}</span>
+        <span role="cell" class="cp-act">${u.manageable || u.me ? `<button type="button" class="dots" data-menu aria-haspopup="true" aria-expanded="false" aria-label="פעולות על ${esc(u.username)}">⋯</button>` : ""}</span>
         <div class="cp-reset" data-resetbox hidden></div></div>`).join("") || '<p class="cp-empty">אין משתמשים שמתאימים לחיפוש</p>'}
     </div>
     <p class="hint">אין שחזור סיסמה עצמי: מי ששכח סיסמה פונה למנהל, והמנהל קובע לו סיסמה זמנית. בכניסה הבאה הוא בוחר סיסמה חדשה.</p>`;
@@ -122,9 +122,9 @@ function closeRowMenu(focusBack) {
 }
 function openRowMenu(btn) {
   closeRowMenu(); const u = userOf(btn.closest("[data-u]").dataset.u);
-  const items = [["reset", "סיסמה זמנית"], u.mfa ? ["mfar", "איפוס אימות דו־שלבי"] : null,
+  const items = u.manageable ? [["name", "עריכת שם"], ["reset", "סיסמה זמנית"], u.mfa ? ["mfar", "איפוס אימות דו־שלבי"] : null,
     PLATFORM ? ["plat", u.platform ? "הסרת מנהל מערכת" : "הפיכה למנהל מערכת"] : null,
-    ["dis", u.disabled ? "הפעלה" : "השבתה"], ["del", "מחיקה"]].filter(Boolean);
+    ["dis", u.disabled ? "הפעלה" : "השבתה"], ["del", "מחיקה"]].filter(Boolean) : [["name", "עריכת השם שלי"]];
   const el = document.createElement("div"); el.className = "rowmenu"; el.setAttribute("role", "menu");
   el.innerHTML = items.map(([k, t]) => `<button type="button" role="menuitem" data-do="${k}"${k === "del" ? ' class="danger"' : ""}>${t}</button>`).join("");
   btn.parentNode.append(el); btn.setAttribute("aria-expanded", "true"); CMENU = { el, btn }; el.querySelector("button").focus();
@@ -152,6 +152,13 @@ $("#cpBody").addEventListener("click", async e => {
       <div class="msg pwchk" id="rpwc-${esc(u.user_id)}" data-rpwchk aria-live="polite"></div>`;
     const i = b.querySelector("input"); pwShow(i, b.querySelector("[data-rpwchk]")); i.focus(); i.select(); return;
   }
+  if (k === "name") {
+    const b = row.querySelector("[data-resetbox]"); b.hidden = false;
+    b.innerHTML = `<label for="rnm-${esc(u.user_id)}">שם תצוגה ל־${esc(n)}</label><div class="copyrow"><input id="rnm-${esc(u.user_id)}" data-rnm maxlength="80" value="${esc(u.display_name || "")}" autocomplete="off">
+      <button type="button" class="btn-blue small" data-nsave>שמירה</button><button type="button" class="link-btn" data-rcancel>ביטול</button></div>`;
+    const i = b.querySelector("input"); i.focus(); i.select(); return;
+  }
+  if (t.dataset.nsave != null) return saveName(row, u);
   if (t.dataset.rcancel != null) { const b = row.querySelector("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; row.querySelector("[data-menu]")?.focus(); return }
   if (t.dataset.rsave != null) {
     const i = row.querySelector("[data-rpw]"), pw = i.value;
@@ -165,7 +172,18 @@ $("#cpBody").addEventListener("click", async e => {
   if (k === "del") { if (confirm(`למחוק את המשתמש ${n} לצמיתות? אי אפשר לבטל.`)) ctlDo({ action: "delete", user_id: u.user_id }, `${n} נמחק`); return }
 });
 document.addEventListener("click", e => { if (CMENU && !e.target.closest(".rowmenu,[data-menu]")) closeRowMenu() });
+async function saveName(row, u) {
+  const i = row.querySelector("[data-rnm]"), v = i.value.trim();
+  if (!v) { cmsg("צריך לכתוב שם", "err"); i.focus(); return }
+  if (v === (u.display_name || "")) { const b = row.querySelector("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; return }
+  if (await ctlDo({ action: "set_name", user_id: u.user_id, display_name: v }, `השם של ${u.username} עודכן ל־${v}`) && u.me) {
+    if (PROFILE) PROFILE.display_name = v;
+    $("#hello").textContent = `שלום ${v}`; $("#userName").textContent = v; $("#menuName").textContent = v;
+  }
+}
 $("#cpBody").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.dataset.rnm != null) { e.preventDefault(); const row = e.target.closest("[data-u]"); return saveName(row, userOf(row.dataset.u)) }
+  if (e.key === "Escape" && e.target.dataset.rnm != null) { e.stopPropagation(); const b = e.target.closest("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; return }
   if (!CMENU || !e.target.closest(".rowmenu")) return;
   const items = [...CMENU.el.querySelectorAll("button")], i = items.indexOf(document.activeElement);
   if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus() }
