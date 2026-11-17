@@ -342,11 +342,11 @@ function mfaHtml() {
 const whenHe = t => new Date(t).toLocaleString("he-IL", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
 function trustHtml() {
   const t = trustUntil();
-  return t ? `<p><b>מסומן כמכשיר אישי</b> עד ${esc(whenHe(t))}. עד אז החשבון נשאר מחובר גם בלי פעילות (במקום ניתוק אחרי 30 דקות).</p>
+  return t ? `<p><b>מסומן כמכשיר אישי</b> עד ${esc(whenHe(t))}. עד אז החשבון נשאר מחובר גם בלי פעילות (במקום ניתוק אחרי ${IDLE_MIN} דקות).</p>
       <button type="button" class="btn-line" id="sTrustOff">ביטול סימון המכשיר</button> <span class="msg" id="sTrMsg" aria-live="polite"></span>`
-    : `<p>לא מסומן כמכשיר אישי: אחרי 30 דקות בלי פעילות החשבון מתנתק.</p>
+    : `<p>לא מסומן כמכשיר אישי: אחרי ${IDLE_MIN} דקות בלי פעילות החשבון מתנתק.</p>
       <p class="hint">רק במכשיר אישי עם נעילת מסך. במחשב משותף לא לסמן.</p>
-      <button type="button" class="btn-line" id="sTrustOn">סימון כמכשיר אישי ל־12 שעות</button> <span class="msg" id="sTrMsg" aria-live="polite"></span>`;
+      <button type="button" class="btn-line" id="sTrustOn">סימון כמכשיר אישי ל־${trustLabel()}</button> <span class="msg" id="sTrMsg" aria-live="polite"></span>`;
 }
 function recHtml() {
   const r = SEC.rec;
@@ -411,7 +411,7 @@ $("#cpBody").addEventListener("click", async e => {
   }
   if (id === "sTrustOff" || id === "sTrustOn") {
     lsSet(TRUST, id === "sTrustOn" ? String(Date.now() + TRUST_H * 36e5) : null); $("#sTr").innerHTML = trustHtml();
-    smsg("sTrMsg", id === "sTrustOn" ? "המכשיר סומן כאישי ל־12 שעות" : "הסימון בוטל. מעכשיו ניתוק אחרי 30 דקות בלי פעילות", "ok");
+    smsg("sTrMsg", id === "sTrustOn" ? `המכשיר סומן כאישי ל־${trustLabel()}` : `הסימון בוטל. מעכשיו ניתוק אחרי ${IDLE_MIN} דקות בלי פעילות`, "ok");
     $(id === "sTrustOn" ? "#sTrustOff" : "#sTrustOn").focus(); return;
   }
   if (!["sEmSave", "sEmDel", "sGen"].includes(id)) return;

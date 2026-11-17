@@ -9,15 +9,18 @@
 const SB = "https://xghfcdgettrcdciwwzbl.supabase.co", KEY = "sb_publishable_hCBsqYekz61JY6SFfT_sjw_-wj0QGXT";
 const DOMAIN = "users.yalla-sa.app";
 const DEADHEAD = "/deadhead-dashboard/";
-const SKEY = "ys_session", ACT = "ys_act", TRUST = "ys_trust", TRUST_H = 12;
+const SKEY = "ys_session", ACT = "ys_act", TRUST = "ys_trust";
+// durations come from assets/auth-settings.js (one place for the portal and the tools)
+const AUTHCFG = window.YS_AUTH || { trustHours: 12, idleMinutes: 30 }, TRUST_H = +AUTHCFG.trustHours || 12, IDLE_MIN = +AUTHCFG.idleMinutes || 30;
+const trustLabel = () => TRUST_H >= 48 && TRUST_H % 24 === 0 ? `${TRUST_H / 24} יום` : `${TRUST_H} שעות`;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const lsGet = k => { try { return localStorage.getItem(k) } catch { return null } };
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch { } };
-// idle sign-out after 30 minutes; on a device marked as personal at sign-in (TRUST = expiry, 12 hours) after 12 hours.
-// The deadhead tool reads the same keys. Sign-out clears the mark.
+// idle sign-out after IDLE_MIN minutes; a device marked as personal at sign-in (TRUST = expiry, TRUST_H from sign-in)
+// has no idle sign-out until then. The tools read the same keys. Sign-out clears the mark.
 const trustUntil = () => { const t = +lsGet(TRUST) || 0; return t > Date.now() ? t : 0 };
-const idleMs = () => (trustUntil() ? TRUST_H * 60 : 30) * 6e4;
+const idleMs = () => trustUntil() ? Infinity : IDLE_MIN * 6e4;
 
 // ---------- session ----------
 let SES = null; try { SES = JSON.parse(lsGet(SKEY) || "null") } catch { }
@@ -130,7 +133,7 @@ function gateMode(m, { err = "", msg = "" } = {}) {
   if (m === "login") {
     S.textContent = "שם משתמש וסיסמה של yalla-sa";
     F.innerHTML = fld("gUser", "שם משתמש", "text", "username", `value="${esc(uname)}" autocapitalize="off" spellcheck="false"`) + fld("gpw", "סיסמה", "password", "current-password")
-      + `<label class="trust"><input type="checkbox" id="gTrust" aria-describedby="gTrustHint"${trustUntil() ? " checked" : ""}><span>זה המכשיר האישי שלי: להישאר מחובר 12 שעות</span></label>
+      + `<label class="trust"><input type="checkbox" id="gTrust" aria-describedby="gTrustHint"${trustUntil() ? " checked" : ""}><span>זה המכשיר האישי שלי: להישאר מחובר ${trustLabel()}</span></label>
       <p class="trust-hint" id="gTrustHint">רק במכשיר אישי עם נעילת מסך. במחשב משותף לא לסמן.</p>`;
     B.textContent = "כניסה";
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="help" aria-expanded="false" aria-controls="gHelp">אין לי גישה</button>
