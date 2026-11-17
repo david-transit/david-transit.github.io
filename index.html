@@ -95,6 +95,16 @@
       <p class="hint">מעבירים למשתמש את שם המשתמש והסיסמה הזמנית בעצמך. בכניסה הראשונה הוא חייב לבחור סיסמה חדשה.</p>
     </form>
   </dialog>
+  <dialog id="dlgStep" class="dlg-new dlg-step" aria-labelledby="stTitle">
+    <form id="stepForm" novalidate autocomplete="off">
+      <h2 id="stTitle">קוד אימות</h2>
+      <p>כדי לפתוח את פאנל הבקרה, הקלד את הקוד שמוצג עכשיו באפליקציית האימות בטלפון.</p>
+      <div class="field"><label for="stOtp">קוד בן 6 ספרות</label><input id="stOtp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" dir="ltr"></div>
+      <p id="stMsg" class="msg" role="alert"></p>
+      <div class="nbtns"><button id="stOk" class="btn-blue">אישור</button><button type="button" id="stCancel" class="link-btn">ביטול</button></div>
+      <p class="hint">הטלפון לא איתך? מנהל מערכת אחר יכול לאפס לך את האימות.</p>
+    </form>
+  </dialog>
   <footer class="foot"><span dir="ltr">yalla-sa</span> · כל כלי באתר נפרד, כניסה אחת לכולם</footer>
 </div>
 

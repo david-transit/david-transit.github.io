@@ -14,8 +14,41 @@ Object.assign(ERR, {
   password_change_not_allowed: "שינוי סיסמה רק דרך המסך של האתר", mfa_change_not_allowed: "לשינוי האימות הדו־שלבי צריך להיכנס עם קוד האימות",
   last_platform_admin: "חייב להישאר לפחות מנהל מערכת פעיל אחד", bad_email: "כתובת המייל לא תקינה", email_taken: "המייל הזה כבר משויך לחשבון אחר",
 });
-const fnAuth = async body => http(SB + "/functions/v1/manage_users", { method: "POST",
+const fnRaw = async body => http(SB + "/functions/v1/manage_users", { method: "POST",
   headers: { apikey: KEY, "Content-Type": "application/json", Authorization: "Bearer " + await token() }, body: JSON.stringify(body) }, 30000);
+// step-up (David, 2026-11-18): sign-in is password-only; manage_users refuses sensitive actions without aal2. When it
+// does, ask for the code here and try once more. The server stays the enforcement.
+async function fnAuth(body) {
+  try { return await fnRaw(body) }
+  catch (e) {
+    if (!/mfa_required|mfa_enroll_required/.test(e.message)) throw e;
+    const ver = (await myFactors()).filter(f => f.status === "verified");
+    if (!ver.length || await stepDialog(ver[0].id) !== "ok") throw e;
+    return fnRaw(body);
+  }
+}
+// the code dialog: resolves "ok" once the session is aal2, "cancel" when closed
+function stepDialog(fid) {
+  return new Promise(res => {
+    const d = $("#dlgStep"), f = $("#stepForm"), m = $("#stMsg"), ok = $("#stOk");
+    $("#stOtp").value = ""; m.className = "msg"; m.textContent = "";
+    const done = r => { f.onsubmit = null; $("#stCancel").onclick = null; d.onclose = null; if (d.open) d.close(); res(r) };
+    f.onsubmit = async e => {
+      e.preventDefault(); m.className = "msg"; m.textContent = "בודק…"; ok.disabled = true;
+      try { await mfaVerify(fid, $("#stOtp").value); done("ok") }
+      catch (err) { m.className = "msg err"; m.textContent = errText(err); $("#stOtp").select() } finally { ok.disabled = false }
+    };
+    $("#stCancel").onclick = () => done("cancel"); d.onclose = () => done("cancel"); // Escape closes the dialog
+    d.showModal(); $("#stOtp").focus();
+  });
+}
+// before the users / permissions tabs: "ok" (aal2 now), "cancel", or "none" (no verified factor yet)
+async function stepUp() {
+  if (aal() === "aal2") return "ok";
+  const ver = (await myFactors()).filter(f => f.status === "verified");
+  return ver.length ? stepDialog(ver[0].id) : "none";
+}
+const NEED_ENROLL = "כדי לנהל משתמשים והרשאות צריך אימות דו־שלבי. הפעל אותו כאן, בלשונית \"האבטחה שלי\", ואז הלשוניות של המשתמשים וההרשאות ייפתחו.";
 const USERRE = /^[a-z0-9._-]{3,32}$/;
 // password policy (manage_users): at least 8 characters, with a letter and a digit
 const weakPw = pw => pw.length < 8 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw);
@@ -46,10 +79,17 @@ function cpSetup() { // called after the portal opens (portal.js showPortal)
   if (want) { q.searchParams.delete("panel"); history.replaceState(null, "", q.pathname + q.search); if (["users", "matrix", "sec"].includes(want)) cpOpen(want) }
 }
 let cpReturn = null;
-function cpOpen(tab) {
+async function cpOpen(tab) {
   cpReturn = document.activeElement; toggleMenu(null, false);
-  CTAB = canManage() ? tab || CTAB : "sec"; P().hidden = false; $("#cpShade").hidden = false; document.body.classList.add("cp-open");
-  $("#cpBtn").setAttribute("aria-pressed", "true"); cmsg(""); cpDraw(true);
+  CTAB = canManage() ? tab || CTAB : "sec";
+  let st = "ok", note = "";
+  if (CTAB !== "sec") { // the code is asked here, when the panel opens, not at sign-in
+    try { st = await stepUp() } catch (e) { st = "cancel"; alert(errText(e)) }
+    if (st === "cancel") { (cpReturn && cpReturn.isConnected ? cpReturn : $("#cpBtn")).focus?.(); return }
+    if (st === "none") { CTAB = "sec"; note = NEED_ENROLL }
+  }
+  P().hidden = false; $("#cpShade").hidden = false; document.body.classList.add("cp-open");
+  $("#cpBtn").setAttribute("aria-pressed", "true"); cmsg(note, note ? "err" : ""); cpDraw(true);
   $("#cpClose").focus();
 }
 function cpClose() {
@@ -77,6 +117,10 @@ async function cpDraw(reload = false) {
   for (const b of $("#cpTabs").querySelectorAll("[data-tab]")) { const on = b.dataset.tab === CTAB; b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1 }
   const box = $("#cpBody");
   if (CTAB === "sec") return drawSec();
+  if (aal() !== "aal2") { // e.g. a tab clicked after the session dropped to aal1 (password change): ask again
+    const st = await stepUp();
+    if (st !== "ok") { box.innerHTML = `<p class="cp-empty">${st === "none" ? esc(NEED_ENROLL) : "צריך להקליד את קוד האימות כדי לראות את המשתמשים וההרשאות."}</p>`; return }
+  }
   if (reload || !CTL) {
     box.innerHTML = '<p class="cp-empty">טוען…</p>';
     try { [CTL] = await Promise.all([fnAuth({ action: "list" }), loadTiles()]) }
@@ -266,7 +310,8 @@ const qrSrc = q => String(q).startsWith("data:") ? q : "data:image/svg+xml;chars
 let SEC = null, ENRL = null, CODES = null;
 async function drawSec() {
   const box = $("#cpBody"); box.innerHTML = '<p class="cp-empty">טוען…</p>';
-  try { SEC = { on: (await myFactors()).some(f => f.status === "verified"), rec: PLATFORM ? await fnAuth({ action: "my_security" }) : null } }
+  // recovery settings (platform admins) are sensitive: shown only in an aal2 session (manage_users enforces it too)
+  try { SEC = { on: (await myFactors()).some(f => f.status === "verified"), rec: PLATFORM ? (aal() === "aal2" ? await fnAuth({ action: "my_security" }) : { locked: true }) : null } }
   catch (e) { box.innerHTML = `<p class="msg err">${esc(errText(e))}</p>`; return }
   secRender();
 }
@@ -279,6 +324,7 @@ function secRender() {
         ${pwIn("sPw2", "אימות הסיסמה החדשה", "new-password")}
         <button class="btn-blue">שמירת הסיסמה</button> <span class="msg" id="sPwMsg" aria-live="polite"></span></form></section>
     <section class="sec" aria-labelledby="sMfaH"><h3 id="sMfaH">אימות דו־שלבי</h3><div id="sMfa">${mfaHtml()}</div></section>
+    <section class="sec" aria-labelledby="sTrH"><h3 id="sTrH">המכשיר הזה</h3><div id="sTr">${trustHtml()}</div></section>
     ${r ? `<section class="sec" aria-labelledby="sRecH"><h3 id="sRecH">שחזור חשבון (מנהל מערכת)</h3><div id="sRec">${recHtml()}</div></section>` : ""}`;
 }
 function mfaHtml() {
@@ -287,14 +333,26 @@ function mfaHtml() {
       <p class="hint">אין אפשרות לסרוק? הקלד באפליקציה את המפתח: <b dir="ltr" class="mono">${esc(ENRL.totp.secret)}</b></p>
       <div class="field"><label for="sOtp">קוד בן 6 ספרות</label><input id="sOtp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" dir="ltr"></div>
       <button class="btn-blue">הפעלה</button> <span class="msg" id="sMfaMsg" aria-live="polite"></span></form>`;
-  return SEC.on ? `<p><b>פעיל.</b> בכל כניסה, אחרי הסיסמה, מקלידים קוד מאפליקציית האימות.</p>
-      ${isAdminAny() ? '<p class="hint">למנהלים זו חובה: אם תסיר אותו, תתבקש להפעיל אותו מחדש בכניסה הבאה.</p>' : ""}
+  return SEC.on ? `<p><b>פעיל.</b> הכניסה היא בסיסמה בלבד. את הקוד מאפליקציית האימות מקלידים כשפותחים את פאנל הבקרה ולפעולות רגישות.</p>
+      ${isAdminAny() ? '<p class="hint">למנהלים זו חובה: בלי אימות דו־שלבי אי אפשר לנהל משתמשים והרשאות.</p>' : ""}
       <button type="button" class="btn-line danger" id="sMfaOff">הסרת האימות הדו־שלבי</button> <span class="msg" id="sMfaMsg" aria-live="polite"></span>`
     : `<p>לא פעיל. עם אימות דו־שלבי, מי שגילה את הסיסמה שלך עדיין לא יכול להיכנס בלי הטלפון שלך.</p>
       <button type="button" class="btn-blue" id="sMfaOn">הפעלה</button> <span class="msg" id="sMfaMsg" aria-live="polite"></span>`;
 }
+const whenHe = t => new Date(t).toLocaleString("he-IL", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+function trustHtml() {
+  const t = trustUntil();
+  return t ? `<p><b>מסומן כמכשיר אישי</b> עד ${esc(whenHe(t))}. עד אז החשבון נשאר מחובר גם בלי פעילות (במקום ניתוק אחרי 30 דקות).</p>
+      <button type="button" class="btn-line" id="sTrustOff">ביטול סימון המכשיר</button> <span class="msg" id="sTrMsg" aria-live="polite"></span>`
+    : `<p>לא מסומן כמכשיר אישי: אחרי 30 דקות בלי פעילות החשבון מתנתק.</p>
+      <p class="hint">רק במכשיר אישי עם נעילת מסך. במחשב משותף לא לסמן.</p>
+      <button type="button" class="btn-line" id="sTrustOn">סימון כמכשיר אישי ל־12 שעות</button> <span class="msg" id="sTrMsg" aria-live="polite"></span>`;
+}
 function recHtml() {
   const r = SEC.rec;
+  if (r.locked) return SEC.on ? `<p class="hint">ההגדרות האלה רגישות: כדי לראות ולשנות אותן צריך להקליד קוד אימות.</p>
+      <button type="button" class="btn-line" id="sRecUnlock">הקלדת קוד</button> <span class="msg" id="sRecMsg" aria-live="polite"></span>`
+    : '<p class="hint">ההגדרות האלה רגישות: קודם צריך להפעיל אימות דו־שלבי (למעלה).</p>';
   if (CODES) return `<p><b>קודי השחזור החדשים שלך.</b> הם מוצגים עכשיו פעם אחת בלבד. שמור אותם במקום בטוח, לא באותו מחשב שבו אתה נכנס. כל קוד עובד פעם אחת, והקודים הקודמים כבר לא עובדים.</p>
       <div class="codes">${CODES.map(c => `<span dir="ltr">${esc(c)}</span>`).join("")}</div>
       <button type="button" class="btn-line" id="sDl">הורדה כקובץ</button> <button type="button" class="btn-blue" id="sDone">שמרתי אותם</button>`;
@@ -324,7 +382,11 @@ $("#cpBody").addEventListener("submit", async e => {
   }
   if (e.target.id === "sMfaForm") {
     smsg("sMfaMsg", "בודק…");
-    try { await mfaVerify(ENRL.id, $("#sOtp").value); ENRL = null; SEC.on = true; $("#sMfa").innerHTML = mfaHtml(); smsg("sMfaMsg", "האימות הדו־שלבי הופעל", "ok") }
+    try {
+      await mfaVerify(ENRL.id, $("#sOtp").value); ENRL = null; SEC.on = true; $("#sMfa").innerHTML = mfaHtml(); smsg("sMfaMsg", "האימות הדו־שלבי הופעל", "ok");
+      if (canManage()) cmsg("האימות הדו־שלבי הופעל. עכשיו אפשר לנהל משתמשים והרשאות.", "ok");
+      if (PLATFORM) { try { SEC.rec = await fnAuth({ action: "my_security" }) } catch { } $("#sRec").innerHTML = recHtml() }
+    }
     catch (err) { smsg("sMfaMsg", errText(err), "err") }
   }
 });
@@ -343,6 +405,15 @@ $("#cpBody").addEventListener("click", async e => {
     setTimeout(() => URL.revokeObjectURL(a.href), 2000); return;
   }
   if (id === "sDone") { CODES = null; drawSec(); return }
+  if (id === "sRecUnlock") {
+    try { if (await stepUp() !== "ok") return; SEC.rec = await fnAuth({ action: "my_security" }); $("#sRec").innerHTML = recHtml() } catch (err) { smsg("sRecMsg", errText(err), "err") }
+    return;
+  }
+  if (id === "sTrustOff" || id === "sTrustOn") {
+    lsSet(TRUST, id === "sTrustOn" ? String(Date.now() + TRUST_H * 36e5) : null); $("#sTr").innerHTML = trustHtml();
+    smsg("sTrMsg", id === "sTrustOn" ? "המכשיר סומן כאישי ל־12 שעות" : "הסימון בוטל. מעכשיו ניתוק אחרי 30 דקות בלי פעילות", "ok");
+    $(id === "sTrustOn" ? "#sTrustOff" : "#sTrustOn").focus(); return;
+  }
   if (!["sEmSave", "sEmDel", "sGen"].includes(id)) return;
   const pw = $("#sSecPw").value; if (!pw) { smsg("sRecMsg", "צריך להקליד את הסיסמה הנוכחית", "err"); $("#sSecPw").focus(); return }
   smsg("sRecMsg", "שומר…");

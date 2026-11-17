@@ -1,18 +1,23 @@
 // yalla-sa portal: entry gate + tool tiles.
 // Auth mirrors the deadhead tool (dashboard/assets/app.js): same Supabase project, same internal sign-in address
-// <username>@users.yalla-sa.app, same session shape, same error texts, same MFA rule (an account with a verified TOTP
-// factor needs an aal2 session; the DB enforces it in private.mfa_ok). Flows that set a password or enrol MFA
-// (forced change, recovery code, first MFA setup) stay in the deadhead tool, where manage_users accepts the origin:
-// the portal sends the user there instead of forking those rules.
+// <username>@users.yalla-sa.app, same session shape, same error texts.
+// Two-step verification is step-up (David, 2026-11-18): sign-in asks only for the password; the code (aal2) is asked
+// when the control panel opens (panel.js) and manage_users enforces aal2 on the server. Basis: no personal data in the
+// system today; re-check when personal data enters (docs/single-login-design.md).
+// The forced password change and the recovery code stay in the deadhead tool; the portal sends the user there.
 "use strict";
 const SB = "https://xghfcdgettrcdciwwzbl.supabase.co", KEY = "sb_publishable_hCBsqYekz61JY6SFfT_sjw_-wj0QGXT";
 const DOMAIN = "users.yalla-sa.app";
 const DEADHEAD = "/deadhead-dashboard/";
-const SKEY = "ys_session", IDLE_MIN = 30, ACT = "ys_act";
+const SKEY = "ys_session", ACT = "ys_act", TRUST = "ys_trust", TRUST_H = 12;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const lsGet = k => { try { return localStorage.getItem(k) } catch { return null } };
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch { } };
+// idle sign-out after 30 minutes; on a device marked as personal at sign-in (TRUST = expiry, 12 hours) after 12 hours.
+// The deadhead tool reads the same keys. Sign-out clears the mark.
+const trustUntil = () => { const t = +lsGet(TRUST) || 0; return t > Date.now() ? t : 0 };
+const idleMs = () => (trustUntil() ? TRUST_H * 60 : 30) * 6e4;
 
 // ---------- session ----------
 let SES = null; try { SES = JSON.parse(lsGet(SKEY) || "null") } catch { }
@@ -20,14 +25,14 @@ let SES = null; try { SES = JSON.parse(lsGet(SKEY) || "null") } catch { }
 if (SES) document.body.classList.add("signed", "no-intro");
 const lastAct = () => +lsGet(ACT) || 0;
 const touchAct = () => { const n = Date.now(); if (n - lastAct() > 20000) lsSet(ACT, String(n)) };
-if (SES && Date.now() - lastAct() > IDLE_MIN * 6e4) { // stale session: drop it here and revoke it on the server
+if (SES && Date.now() - lastAct() > idleMs()) { // stale session: drop it here and revoke it on the server
   const old = SES; SES = null; lsSet(SKEY, null);
   fetch(SB + "/auth/v1/token?grant_type=refresh_token", { method: "POST", headers: { apikey: KEY, "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: old.refresh_token }) })
     .then(r => r.ok ? r.json() : null).then(j => j && fetch(SB + "/auth/v1/logout", { method: "POST", headers: { apikey: KEY, Authorization: "Bearer " + j.access_token } })).catch(() => { });
 }
 ["pointerdown", "keydown", "wheel", "touchstart"].forEach(t => addEventListener(t, touchAct, { passive: true, capture: true }));
 setInterval(async () => {
-  if (SES && Date.now() - lastAct() > IDLE_MIN * 6e4) { await signOut(); location.replace(location.pathname) }
+  if (SES && Date.now() - lastAct() > idleMs()) { await signOut(); location.replace(location.pathname) }
 }, 60000);
 function setSes(j) {
   SES = j ? { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: +j.expires_at || Math.floor(Date.now() / 1000) + (+j.expires_in || 3600), user: j.user || null } : null;
@@ -82,7 +87,7 @@ async function signIn(user, pw) {
   }
   lsSet("ys_user", user); touchAct();
 }
-async function signOut() { try { if (SES) await authPost("logout", {}, SES.access_token) } catch { } setSes(null) }
+async function signOut() { try { if (SES) await authPost("logout", {}, SES.access_token) } catch { } setSes(null); lsSet(TRUST, null) }
 
 // ---------- MFA (TOTP) ----------
 const jwtOf = t => { try { return JSON.parse(atob(String(t).split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) } catch { return {} } };
@@ -124,21 +129,17 @@ function gateMode(m, { err = "", msg = "" } = {}) {
   const F = $("#gateFields"), A = $("#gateAlt"), B = $("#gateBtn"), S = $("#gateSub"); B.disabled = false; B.hidden = false;
   if (m === "login") {
     S.textContent = "שם משתמש וסיסמה של yalla-sa";
-    F.innerHTML = fld("gUser", "שם משתמש", "text", "username", `value="${esc(uname)}" autocapitalize="off" spellcheck="false"`) + fld("gpw", "סיסמה", "password", "current-password");
+    F.innerHTML = fld("gUser", "שם משתמש", "text", "username", `value="${esc(uname)}" autocapitalize="off" spellcheck="false"`) + fld("gpw", "סיסמה", "password", "current-password")
+      + `<label class="trust"><input type="checkbox" id="gTrust" aria-describedby="gTrustHint"${trustUntil() ? " checked" : ""}><span>זה המכשיר האישי שלי: להישאר מחובר 12 שעות</span></label>
+      <p class="trust-hint" id="gTrustHint">רק במכשיר אישי עם נעילת מסך. במחשב משותף לא לסמן.</p>`;
     B.textContent = "כניסה";
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="help" aria-expanded="false" aria-controls="gHelp">אין לי גישה</button>
       <div id="gHelp" class="help" hidden>
         <p><b>שכחת סיסמה או שאין לך חשבון?</b> פנה למנהל המערכת אצל המפעיל שלך. הוא יכול לאפס לך סיסמה או ליצור לך משתמש.</p>
         <p><b>מנהל מערכת עם קוד שחזור?</b> <a href="${esc(DEADHEAD)}?recover=1">כניסה עם קוד שחזור</a> (נפתח בכלי תכנון נסיעות ריקות).</p>
       </div>`;
-  } else if (m === "mfa") {
-    S.textContent = "אימות דו־שלבי: הקלד את הקוד שמוצג עכשיו באפליקציית האימות בטלפון";
-    F.innerHTML = fld("gOtp", "קוד בן 6 ספרות", "text", "one-time-code", 'inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7"');
-    B.textContent = "אישור";
-    A.innerHTML = `<span class="muted">הטלפון לא איתך? מנהל מערכת יכול לאפס לך את האימות.</span><button type="button" class="link-btn dim" data-gm="logout">יציאה</button>`;
-  } else if (m === "finish") { // forced password change / first MFA setup: done in the deadhead tool (manage_users)
-    const why = PROFILE && PROFILE.must_change_password ? "צריך לבחור סיסמה חדשה" : "מנהל מערכת חייב להפעיל אימות דו־שלבי";
-    S.textContent = `${why}${uname ? " לחשבון " + uname : ""}. עושים את זה פעם אחת בכלי תכנון נסיעות ריקות, ואז חוזרים לכאן.`;
+  } else if (m === "finish") { // forced password change: done in the deadhead tool (manage_users)
+    S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. עושים את זה פעם אחת בכלי תכנון נסיעות ריקות, ואז חוזרים לכאן.`;
     F.innerHTML = ""; B.textContent = "המשך להשלמת החשבון";
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="logout">יציאה</button>`;
   } else if (m === "noaccess") {
@@ -159,10 +160,8 @@ async function nextUrl() {
 // returns true when the portal can open
 async function unlock() {
   await loadAccess();
-  const fs = ((await authReq("GET", "user")).factors || []).filter(f => f.factor_type === "totp"), ver = fs.filter(f => f.status === "verified");
-  if (ver.length && aal() !== "aal2") { MFAF = ver[0].id; gateMode("mfa"); return false }
   if (PROFILE && PROFILE.disabled) { await signOut(); gateMode("login", { err: ERR.disabled }); return false }
-  if ((PROFILE && PROFILE.must_change_password) || (PLATFORM && !ver.length)) { gateMode("finish"); return false }
+  if (PROFILE && PROFILE.must_change_password) { gateMode("finish"); return false }
   if (!OP && !PLATFORM) { gateMode("noaccess"); return false }
   const nx = await nextUrl(); if (nx) { location.replace(nx); return true }
   await showPortal();
@@ -199,9 +198,9 @@ $("#gateForm").addEventListener("submit", async e => {
     if (GMODE === "login") {
       const user = $("#gUser").value.trim().toLowerCase(), pw = $("#gpw").value; $("#gUser").value = user;
       if (!user || !pw) throw new Error("invalid_credentials");
-      await signIn(user, pw); await unlock();
-    } else if (GMODE === "mfa") { await mfaVerify(MFAF, $("#gOtp").value); await unlock() }
-    else if (GMODE === "finish") { location.assign(DEADHEAD) }
+      const trust = !!$("#gTrust")?.checked;
+      await signIn(user, pw); lsSet(TRUST, trust ? String(Date.now() + TRUST_H * 36e5) : null); await unlock();
+    } else if (GMODE === "finish") { location.assign(DEADHEAD) }
     else if (GMODE === "noaccess") { await signOut(); gateMode("login") }
   } catch (err) {
     m.className = "msg err"; m.textContent = errText(err); $("#gateBtn").disabled = false;

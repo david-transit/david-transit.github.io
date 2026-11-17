@@ -243,3 +243,11 @@ body.cp-open{overflow:hidden}
   .frow .pwchk,.frow>.small{grid-column:1}
   .dlg-new{padding:18px}
 }
+
+/* personal device (12 hours) on the sign-in card, and the step-up code dialog */
+.trust{display:flex;align-items:flex-start;gap:10px;margin-top:14px;text-align:right;font-weight:500;cursor:pointer;line-height:1.4}
+.trust input{width:20px;height:20px;margin:1px 0 0;flex:none;accent-color:var(--ys-primary)}
+.trust input:focus-visible{outline:3px solid var(--ys-primary);outline-offset:2px}
+.trust-hint{margin:4px 30px 0 0;font-size:14px;color:var(--ys-muted);text-align:right}
+.dlg-step{width:min(440px,94vw)}
+.dlg-step .field input{max-width:200px;letter-spacing:.2em;font-size:20px}
