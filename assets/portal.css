@@ -131,4 +131,10 @@ button,input,select{font:inherit;color:inherit}
   .go{font-size:15px}
   .foot{width:calc(100% - 32px)}
 }
-@media (prefers-reduced-motion:reduce){.tile.live{transition:none}.tile.live:hover{transform:none}}
+/* gate intro: the logo pops in, then the sign-in fields appear (~1s total) */
+@keyframes ys-pop{0%{opacity:0;transform:scale(.8) translateY(10px)}60%{opacity:1;transform:scale(1.04)}100%{opacity:1;transform:none}}
+@keyframes ys-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.gate-logo{animation:ys-pop .7s cubic-bezier(.2,.8,.2,1) both}
+.gate-card>:not(.gate-logo){animation:ys-in .35s ease-out .65s both}
+
+@media (prefers-reduced-motion:reduce){.tile.live{transition:none}.tile.live:hover{transform:none}.gate-logo,.gate-card>:not(.gate-logo){animation:none}}
