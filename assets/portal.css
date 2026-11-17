@@ -136,5 +136,8 @@ button,input,select{font:inherit;color:inherit}
 @keyframes ys-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .gate-logo{animation:ys-pop .7s cubic-bezier(.2,.8,.2,1) both}
 .gate-card>:not(.gate-logo){animation:ys-in .35s ease-out .65s both}
+/* signed in already (back from a tool): no intro, and nothing of the gate shows while access loads */
+.no-intro .gate-logo,.no-intro .gate-card>:not(.gate-logo){animation:none}
+.signed .gate{visibility:hidden}
 
 @media (prefers-reduced-motion:reduce){.tile.live{transition:none}.tile.live:hover{transform:none}.gate-logo,.gate-card>:not(.gate-logo){animation:none}}

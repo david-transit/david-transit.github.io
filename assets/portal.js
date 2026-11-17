@@ -16,6 +16,8 @@ const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localSt
 
 // ---------- session ----------
 let SES = null; try { SES = JSON.parse(lsGet(SKEY) || "null") } catch { }
+// already signed in (e.g. back from a tool): no intro, the gate stays hidden unless a step is still owed (gateMode shows it)
+if (SES) document.body.classList.add("signed", "no-intro");
 const lastAct = () => +lsGet(ACT) || 0;
 const touchAct = () => { const n = Date.now(); if (n - lastAct() > 20000) lsSet(ACT, String(n)) };
 if (SES && Date.now() - lastAct() > IDLE_MIN * 6e4) { // stale session: drop it here and revoke it on the server
@@ -104,10 +106,12 @@ async function loadAccess() {
     getRows("operators", "select=id,slug,name,logo_url&order=name")]);
   PROFILE = pr[0] || null; PLATFORM = pa.length > 0; MS = ms || [];
   OPS = (ops || []).filter(o => PLATFORM || MS.some(m => m.operator_id === o.id));
-  const want = new URLSearchParams(location.search).get("op") || lsGet("ys_op");
-  OP = OPS.find(o => o.slug === want) || OPS[0] || null;
+  // a platform admin is not a member of an operator: the default view is "all operators" (OP = null); picking an
+  // operator in the switcher only narrows the view. A member starts at his last (or first) operator.
+  const urlOp = new URLSearchParams(location.search).get("op");
+  OP = PLATFORM ? (OPS.find(o => o.slug === urlOp) || null) : (OPS.find(o => o.slug === (urlOp || lsGet("ys_op"))) || OPS[0] || null);
 }
-const roleAt = op => op ? (MS.find(m => m.operator_id === op.id)?.role || (PLATFORM ? "admin" : null)) : null;
+const roleAt = op => PLATFORM ? "admin" : op ? (MS.find(m => m.operator_id === op.id)?.role || null) : null;
 
 // ---------- gate ----------
 let GMODE = "login";
@@ -116,7 +120,7 @@ const fld = (id, label, type, ac, extra = "") => `<div class="field"><label for=
   ? `<div class="pw-wrap"><input id="${id}" type="password" autocomplete="${ac}" dir="ltr" required ${extra}><button type="button" class="eye" data-eye="${id}" aria-label="הצגת הסיסמה" aria-pressed="false">${EYE}</button></div>`
   : `<input id="${id}" type="${type}" autocomplete="${ac}" dir="ltr" required ${extra}>`}</div>`;
 function gateMode(m, { err = "", msg = "" } = {}) {
-  GMODE = m; const uname = (PROFILE && PROFILE.username) || lsGet("ys_user") || "";
+  GMODE = m; document.body.classList.remove("signed"); const uname = (PROFILE && PROFILE.username) || lsGet("ys_user") || "";
   const F = $("#gateFields"), A = $("#gateAlt"), B = $("#gateBtn"), S = $("#gateSub"); B.disabled = false; B.hidden = false;
   if (m === "login") {
     S.textContent = "שם משתמש וסיסמה של yalla-sa";
@@ -125,7 +129,7 @@ function gateMode(m, { err = "", msg = "" } = {}) {
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="help" aria-expanded="false" aria-controls="gHelp">אין לי גישה</button>
       <div id="gHelp" class="help" hidden>
         <p><b>שכחת סיסמה או שאין לך חשבון?</b> פנה למנהל המערכת אצל המפעיל שלך. הוא יכול לאפס לך סיסמה או ליצור לך משתמש.</p>
-        <p><b>מנהל מערכת עם קוד שחזור?</b> <a href="${esc(DEADHEAD)}" rel="noopener">כניסה עם קוד שחזור</a> (נפתח בכלי תכנון נסיעות ריקות).</p>
+        <p><b>מנהל מערכת עם קוד שחזור?</b> <a href="${esc(DEADHEAD)}?recover=1">כניסה עם קוד שחזור</a> (נפתח בכלי תכנון נסיעות ריקות).</p>
       </div>`;
   } else if (m === "mfa") {
     S.textContent = "אימות דו־שלבי: הקלד את הקוד שמוצג עכשיו באפליקציית האימות בטלפון";
@@ -144,6 +148,14 @@ function gateMode(m, { err = "", msg = "" } = {}) {
   const gm = $("#gateMsg"); gm.className = "msg" + (err ? " err" : msg ? " ok" : ""); gm.textContent = err || msg; $("#gateWarn").textContent = "";
   (F.querySelector("input") || B).focus();
 }
+// ?next=<path>: a tool sent the user here to sign in; back only to a live tool's own path on this site (allow-list)
+async function nextUrl() {
+  const n = new URLSearchParams(location.search).get("next") || "";
+  if (!/^\/[a-z0-9-]+\/[^\\]*$/i.test(n) || n.startsWith("//")) return "";
+  try { await loadTiles() } catch { return "" }
+  const ok = TILES.some(t => t.status === "live" && typeof t.url === "string" && t.url.startsWith("/") && n.startsWith(t.url));
+  return ok ? n : "";
+}
 // returns true when the portal can open
 async function unlock() {
   await loadAccess();
@@ -151,7 +163,8 @@ async function unlock() {
   if (ver.length && aal() !== "aal2") { MFAF = ver[0].id; gateMode("mfa"); return false }
   if (PROFILE && PROFILE.disabled) { await signOut(); gateMode("login", { err: ERR.disabled }); return false }
   if ((PROFILE && PROFILE.must_change_password) || (PLATFORM && !ver.length)) { gateMode("finish"); return false }
-  if (!OP) { gateMode("noaccess"); return false }
+  if (!OP && !PLATFORM) { gateMode("noaccess"); return false }
+  const nx = await nextUrl(); if (nx) { location.replace(nx); return true }
   await showPortal();
   return true;
 }
@@ -213,6 +226,7 @@ async function loadTiles() {
 const RANK = { viewer: 1, editor: 2, admin: 3 };
 const canOpen = t => { const r = roleAt(OP); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
 function tileUrl(t) { const u = new URL(t.url, location.href); if (OP) u.searchParams.set("op", OP.slug); return u.href }
+const ALLOPS = "מנהל מערכת · כל המפעילים";
 function drawTiles() {
   const list = (TILES || []).filter(t => t.status === "soon" || (t.status === "live" && t.url && canOpen(t)));
   $("#tiles").innerHTML = list.map(t => {
@@ -226,19 +240,21 @@ function drawTiles() {
 }
 function drawOperator() {
   const sel = $("#opSel"), wrap = $("#opWrap");
-  sel.innerHTML = OPS.map(o => `<option value="${esc(o.slug)}"${o === OP ? " selected" : ""}>${esc(o.name)}</option>`).join("");
-  sel.disabled = OPS.length < 2; wrap.classList.toggle("single", OPS.length < 2);
+  sel.innerHTML = (PLATFORM ? `<option value=""${OP ? "" : " selected"}>${ALLOPS}</option>` : "") +
+    OPS.map(o => `<option value="${esc(o.slug)}"${o === OP ? " selected" : ""}>${esc(o.name)}</option>`).join("");
+  const single = !PLATFORM && OPS.length < 2; sel.disabled = single; wrap.classList.toggle("single", single);
   // operators.logo_url is a site-relative path (assets/operators/<slug>.png, copied here from the deadhead tool);
   // external URLs are not loaded (CSP img-src 'self')
   const lg = $("#opLogo"), src = OP && OP.logo_url && /^assets\/operators\/[a-z0-9-]+\.(png|svg|webp)$/.test(OP.logo_url) ? OP.logo_url : "";
   lg.hidden = !src; if (src) { lg.src = src; lg.alt = "" }
-  if (OP) lsSet("ys_op", OP.slug);
+  if (OP && !PLATFORM) lsSet("ys_op", OP.slug);
   const r = roleAt(OP); $("#menuRole").textContent = PLATFORM ? "מנהל מערכת" : r ? `${ROLEHE[r]} · ${OP.name}` : "";
 }
 $("#opLogo").addEventListener("error", e => { e.target.hidden = true });
 $("#opSel").addEventListener("change", e => {
-  OP = OPS.find(o => o.slug === e.target.value) || OP; drawOperator(); drawTiles();
-  const u = new URL(location.href); u.searchParams.set("op", OP.slug); history.replaceState(null, "", u.pathname + u.search);
+  OP = OPS.find(o => o.slug === e.target.value) || (PLATFORM ? null : OP); drawOperator(); drawTiles();
+  const u = new URL(location.href); if (OP) u.searchParams.set("op", OP.slug); else u.searchParams.delete("op");
+  history.replaceState(null, "", u.pathname + u.search);
 });
 async function showPortal() {
   const name = (PROFILE && (PROFILE.display_name || PROFILE.username)) || lsGet("ys_user") || "";
@@ -248,6 +264,7 @@ async function showPortal() {
   try { await loadTiles(); drawTiles(); $("#tilesMsg").textContent = "" }
   catch (e) { console.warn(e); $("#tilesMsg").className = "msg err"; $("#tilesMsg").textContent = "לא ניתן לטעון את רשימת הכלים. רענן את הדף." }
   document.title = OP ? `יאללה־סע · ${OP.name}` : "יאללה־סע";
+  document.body.classList.remove("signed");
   $("#gate").hidden = true; $("#portal").hidden = false; document.body.classList.remove("is-gate");
   placeOp();
 }
