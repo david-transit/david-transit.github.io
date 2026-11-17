@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<!-- Same policy as the deadhead tool: every script is a file, no inline script or handler; frame.js refuses framing. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://xghfcdgettrcdciwwzbl.supabase.co; base-uri 'none'; form-action 'self'; object-src 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<script src="assets/frame.js"></script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>יאללה־סע</title>
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="assets/brand/yalla-sa-mark-v6.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/portal.css">
+</head>
+<body class="is-gate">
+
+<!-- ===== entry gate ===== -->
+<main id="gate" class="gate">
+  <form id="gateForm" class="gate-card" novalidate>
+    <img class="gate-logo" src="assets/brand/yalla-sa-logo-v6.svg" alt="יאללה־סע yalla-sa" width="1175" height="1050">
+    <h1 class="gate-title">כניסה למערכת</h1>
+    <p id="gateSub" class="gate-sub">שם משתמש וסיסמה של yalla-sa</p>
+    <div id="gateFields"></div>
+    <p id="gateWarn" class="gate-warn" role="status"></p>
+    <p id="gateMsg" class="msg" role="alert"></p>
+    <button id="gateBtn" class="btn-primary" type="submit">כניסה</button>
+    <div id="gateAlt" class="gate-alt"></div>
+  </form>
+</main>
+
+<!-- ===== portal ===== -->
+<div id="portal" class="portal" hidden>
+  <header class="top">
+    <a class="brand" href="./" aria-label="yalla-sa, דף הבית">
+      <img src="assets/brand/yalla-sa-mark-v6.svg" alt="" width="36" height="36"><span dir="ltr">yalla-sa</span>
+    </a>
+    <div class="top-tools">
+      <label class="op-pill" id="opWrap">
+        <span class="sr">מפעיל</span>
+        <img id="opLogo" class="op-logo" alt="" hidden>
+        <select id="opSel"></select>
+      </label>
+      <span class="sep" aria-hidden="true"></span>
+      <div class="user">
+        <button id="userBtn" class="user-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="userMenu">
+          <span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4 20.5c0-4.2 3.6-6.5 8-6.5s8 2.3 8 6.5"/></svg></span>
+          <span id="userName"></span>
+        </button>
+        <div id="userMenu" class="menu" hidden>
+          <div class="menu-head"><b id="menuName"></b><span id="menuUser" dir="ltr"></span><span id="menuRole"></span></div>
+          <button type="button" class="menu-item" data-act="logout">יציאה</button>
+        </div>
+      </div>
+      <span class="sep" aria-hidden="true"></span>
+      <button id="logoutBtn" class="link-btn" type="button">יציאה</button>
+    </div>
+    <button id="menuBtn" class="menu-btn" type="button" aria-label="תפריט" aria-haspopup="true" aria-expanded="false" aria-controls="userMenu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+  </header>
+  <div class="op-mobile" id="opMobileSlot"></div>
+  <main class="content">
+    <h1 class="hello" id="hello"></h1>
+    <p class="hello-sub">בחר כלי לעבודה</p>
+    <div id="tiles" class="tiles"></div>
+    <p id="tilesMsg" class="msg" role="status"></p>
+  </main>
+  <footer class="foot"><span dir="ltr">yalla-sa</span> · כל כלי באתר נפרד, כניסה אחת לכולם</footer>
+</div>
+
+<script src="assets/portal.js"></script>
+</body>
+</html>
