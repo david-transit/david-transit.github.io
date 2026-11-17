@@ -7,7 +7,7 @@
 "use strict";
 const SB = "https://xghfcdgettrcdciwwzbl.supabase.co", KEY = "sb_publishable_hCBsqYekz61JY6SFfT_sjw_-wj0QGXT";
 const DOMAIN = "users.yalla-sa.app";
-const DEADHEAD = "https://david-transit.github.io/deadhead-dashboard/";
+const DEADHEAD = "/deadhead-dashboard/";
 const SKEY = "ys_session", IDLE_MIN = 30, ACT = "ys_act";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -212,7 +212,7 @@ async function loadTiles() {
 // operator with role >= min_role (platform admins see all). "soon" tiles show to everyone, not clickable.
 const RANK = { viewer: 1, editor: 2, admin: 3 };
 const canOpen = t => { const r = roleAt(OP); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
-function tileUrl(t) { const u = new URL(t.url); if (OP) u.searchParams.set("op", OP.slug); return u.href }
+function tileUrl(t) { const u = new URL(t.url, location.href); if (OP) u.searchParams.set("op", OP.slug); return u.href }
 function drawTiles() {
   const list = (TILES || []).filter(t => t.status === "soon" || (t.status === "live" && t.url && canOpen(t)));
   $("#tiles").innerHTML = list.map(t => {
