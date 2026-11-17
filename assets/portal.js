@@ -226,7 +226,7 @@ async function loadTiles() {
 const RANK = { viewer: 1, editor: 2, admin: 3 };
 const canOpen = t => { const r = roleAt(OP); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
 function tileUrl(t) { const u = new URL(t.url, location.href); if (OP) u.searchParams.set("op", OP.slug); return u.href }
-const ALLOPS = "מנהל מערכת · כל המפעילים";
+const ALLOPS = "כל המפעילים";
 function drawTiles() {
   const list = (TILES || []).filter(t => t.status === "soon" || (t.status === "live" && t.url && canOpen(t)));
   $("#tiles").innerHTML = list.map(t => {
@@ -265,6 +265,7 @@ async function showPortal() {
   catch (e) { console.warn(e); $("#tilesMsg").className = "msg err"; $("#tilesMsg").textContent = "לא ניתן לטעון את רשימת הכלים. רענן את הדף." }
   document.title = OP ? `יאללה־סע · ${OP.name}` : "יאללה־סע";
   document.body.classList.remove("signed");
+  if (typeof cpSetup === "function") cpSetup();
   $("#gate").hidden = true; $("#portal").hidden = false; document.body.classList.remove("is-gate");
   placeOp();
 }

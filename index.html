@@ -36,6 +36,8 @@
       <img src="assets/brand/yalla-sa-mark-v6.svg" alt="" width="36" height="36"><span dir="ltr">yalla-sa</span>
     </a>
     <div class="top-tools">
+      <button id="cpBtn" class="cp-btn" type="button" aria-pressed="false" aria-controls="cp" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>פאנל בקרה</button>
       <label class="op-pill" id="opWrap">
         <span class="sr">מפעיל</span>
         <img id="opLogo" class="op-logo" alt="" hidden>
@@ -49,6 +51,7 @@
         </button>
         <div id="userMenu" class="menu" hidden>
           <div class="menu-head"><b id="menuName"></b><span id="menuUser" dir="ltr"></span><span id="menuRole"></span></div>
+          <button type="button" class="menu-item" data-act="security">האבטחה שלי</button>
           <button type="button" class="menu-item" data-act="logout">יציאה</button>
         </div>
       </div>
@@ -66,9 +69,36 @@
     <div id="tiles" class="tiles"></div>
     <p id="tilesMsg" class="msg" role="status"></p>
   </main>
+  <!-- control panel: docked on the right over the dimmed tiles page (approved reference design/control-panel-reference-v1.webp) -->
+  <div id="cpShade" class="cp-shade" hidden></div>
+  <section id="cp" class="cp" role="dialog" aria-modal="true" aria-labelledby="cpTitle" hidden>
+    <div class="cp-head"><h2 id="cpTitle">פאנל בקרה</h2><button id="cpClose" class="cp-x" type="button" aria-label="סגירת פאנל הבקרה">✕</button></div>
+    <div id="cpTabs" class="cp-tabs" role="tablist" aria-label="פאנל בקרה">
+      <button type="button" role="tab" data-tab="users" aria-controls="cpBody">משתמשים</button>
+      <button type="button" role="tab" data-tab="matrix" aria-controls="cpBody">הרשאות לפי כלי</button>
+      <button type="button" role="tab" data-tab="sec" aria-controls="cpBody">האבטחה שלי</button>
+    </div>
+    <p id="cpMsg" class="msg" role="status"></p>
+    <div id="cpBody" class="cp-body" role="tabpanel" tabindex="-1"></div>
+  </section>
+  <dialog id="dlgNew" class="dlg-new" aria-labelledby="nTitle">
+    <form id="newForm" novalidate autocomplete="off">
+      <h2 id="nTitle">משתמש חדש</h2>
+      <div class="frow"><label for="nOp">סוג גישה</label><select id="nOp"></select></div>
+      <div class="frow"><label for="nName">שם מלא</label><input id="nName" maxlength="80"></div>
+      <div class="frow"><label for="nUser">שם משתמש</label><input id="nUser" dir="ltr" autocapitalize="off" spellcheck="false" aria-describedby="nUserHint"><span id="nUserHint" class="muted small">אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון</span></div>
+      <div class="frow"><label for="nPw">סיסמה זמנית</label><div class="copyrow"><input id="nPw" dir="ltr" autocomplete="new-password" aria-describedby="nPwChk"><button type="button" class="btn-line small" id="nGen">הצעה</button></div>
+        <div class="msg pwchk muted" id="nPwChk" aria-live="polite"></div></div>
+      <div class="frow" id="nRoleBox"><label for="nRole">רמת הרשאה</label><select id="nRole"></select></div>
+      <p id="nMsg" class="msg" role="alert"></p>
+      <div class="nbtns"><button id="nSave" class="btn-blue">יצירת משתמש</button><button type="button" id="nCancel" class="link-btn">ביטול</button></div>
+      <p class="hint">מעבירים למשתמש את שם המשתמש והסיסמה הזמנית בעצמך. בכניסה הראשונה הוא חייב לבחור סיסמה חדשה.</p>
+    </form>
+  </dialog>
   <footer class="foot"><span dir="ltr">yalla-sa</span> · כל כלי באתר נפרד, כניסה אחת לכולם</footer>
 </div>
 
 <script src="assets/portal.js"></script>
+<script src="assets/panel.js"></script>
 </body>
 </html>
