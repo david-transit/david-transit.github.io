@@ -6,5 +6,5 @@
   {"id": "notice-create", "title": "יוצר פרסומים", "desc": "הכנת פרסומים על שינויים בקווים", "icon": "doc-pen",
    "url": null, "status": "soon", "module": "notice-create", "min_role": "editor"},
   {"id": "studio", "title": "כלי התכנון", "desc": "תכנון קווים, לוחות זמנים וסידורים", "icon": "map",
-   "url": null, "status": "soon", "module": "studio", "min_role": "viewer"}
+   "url": "https://app.yalla-sa.app/", "status": "live", "module": "studio", "min_role": "viewer"}
 ]

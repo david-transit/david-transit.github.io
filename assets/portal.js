@@ -231,7 +231,8 @@ async function loadTiles() {
 // operator with role >= min_role (platform admins see all). "soon" tiles show to everyone, not clickable.
 const RANK = { viewer: 1, editor: 2, admin: 3 };
 const canOpen = t => { const r = roleAt(OP); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
-function tileUrl(t) { const u = new URL(t.url, location.href); if (OP) u.searchParams.set("op", OP.slug); return u.href }
+// ?op= only for tools on this site; another domain (app.yalla-sa.app) has its own sign-in and operator choice
+function tileUrl(t) { const u = new URL(t.url, location.href); if (OP && u.origin === location.origin) u.searchParams.set("op", OP.slug); return u.href }
 const ALLOPS = "כל המפעילים";
 function drawTiles() {
   const list = (TILES || []).filter(t => t.status === "soon" || (t.status === "live" && t.url && canOpen(t)));
