@@ -91,7 +91,11 @@ async function signIn(user, pw) {
   }
   lsSet("ys_user", user); touchAct();
 }
-async function signOut() { try { if (SES) await authPost("logout", {}, SES.access_token) } catch { } setSes(null); lsSet(TRUST, null) }
+async function signOut() {
+  try { if (SES) await authPost("logout", {}, SES.access_token) } catch { } setSes(null); lsSet(TRUST, null);
+  // end the Cloudflare Access session of the tools too (app.yalla-sa.app); best effort, never blocks the sign-out
+  if (AUTHCFG.accessLogout) try { await Promise.race([fetch(AUTHCFG.accessLogout, { mode: "no-cors", credentials: "include", cache: "no-store" }), new Promise(r => setTimeout(r, 2500))]) } catch { }
+}
 
 // ---------- MFA (TOTP) ----------
 const jwtOf = t => { try { return JSON.parse(atob(String(t).split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) } catch { return {} } };
@@ -132,7 +136,7 @@ function gateMode(m, { err = "", msg = "" } = {}) {
   GMODE = m; document.body.classList.remove("signed"); const uname = (PROFILE && PROFILE.username) || lsGet("ys_user") || "";
   const F = $("#gateFields"), A = $("#gateAlt"), B = $("#gateBtn"), S = $("#gateSub"); B.disabled = false; B.hidden = false;
   if (m === "login") {
-    S.textContent = "שם משתמש וסיסמה של yalla-sa";
+    S.textContent = OAUTH_ID ? "כניסה לכלי דרך yalla-sa: שם משתמש וסיסמה" : "שם משתמש וסיסמה של yalla-sa";
     F.innerHTML = fld("gUser", "שם משתמש", "text", "username", `value="${esc(uname)}" autocapitalize="off" spellcheck="false"`) + fld("gpw", "סיסמה", "password", "current-password")
       + `<label class="trust"><input type="checkbox" id="gTrust" aria-describedby="gTrustHint"${trustUntil() ? " checked" : ""}><span>זה המכשיר האישי שלי: להישאר מחובר ${trustLabel()}</span></label>
       <p class="trust-hint" id="gTrustHint">רק במכשיר אישי עם נעילת מסך. במחשב משותף לא לסמן.</p>`;
@@ -146,6 +150,9 @@ function gateMode(m, { err = "", msg = "" } = {}) {
     S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. עושים את זה פעם אחת בכלי תכנון נסיעות ריקות, ואז חוזרים לכאן.`;
     F.innerHTML = ""; B.textContent = "המשך להשלמת החשבון";
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="logout">יציאה</button>`;
+  } else if (m === "oauth") { // signing in to a tool through the portal (single gate)
+    S.textContent = err ? "הכניסה לכלי לא הושלמה." : "מעביר אותך לכלי…";
+    F.innerHTML = ""; B.textContent = "לדף הבית של yalla-sa"; B.hidden = !err; A.innerHTML = "";
   } else if (m === "noaccess") {
     S.textContent = `החשבון ${uname} עוד לא שויך לאף מפעיל. פנה למנהל המערכת.`;
     F.innerHTML = ""; B.textContent = "יציאה"; A.innerHTML = "";
@@ -161,12 +168,41 @@ async function nextUrl() {
   const ok = TILES.some(t => t.status === "live" && typeof t.url === "string" && t.url.startsWith("/") && n.startsWith(t.url));
   return ok ? n : "";
 }
+// ---------- single gate: Supabase OAuth server -> Cloudflare Access (app.yalla-sa.app) ----------
+// Supabase sends the browser to /oauth/consent?authorization_id=… (-> /?authorization_id=…). After the usual sign-in the
+// portal approves the request with no consent screen, but ONLY for the Access client and its callback; anything else is
+// refused and the browser is NOT sent to it. Supabase remembers an approval, so the next requests come back approved.
+const OAUTH_ID = (() => { const v = new URLSearchParams(location.search).get("authorization_id") || ""; return /^[A-Za-z0-9_-]{8,128}$/.test(v) ? v : "" })();
+const okCallback = u => { try { const a = new URL(u), b = new URL(AUTHCFG.accessCallback); return a.origin === b.origin && a.pathname === b.pathname } catch { return false } };
+async function oauthConsent() {
+  gateMode("oauth");
+  try {
+    const d = await authReq("GET", "oauth/authorizations/" + encodeURIComponent(OAUTH_ID));
+    if (d && d.redirect_url && !d.authorization_id) { // approved before: Supabase answers with the way back
+      if (!okCallback(d.redirect_url)) throw new Error("oauth_client");
+      location.replace(d.redirect_url); return;
+    }
+    if (!AUTHCFG.accessClientId || !d || !d.client || d.client.id !== AUTHCFG.accessClientId || !okCallback(d.redirect_uri)) {
+      authReq("POST", `oauth/authorizations/${encodeURIComponent(OAUTH_ID)}/consent`, { action: "deny" }).catch(() => { });
+      throw new Error("oauth_client");
+    }
+    const r = await authReq("POST", `oauth/authorizations/${encodeURIComponent(OAUTH_ID)}/consent`, { action: "approve" });
+    if (!r || !okCallback(r.redirect_url)) throw new Error("oauth_client");
+    location.replace(r.redirect_url);
+  } catch (e) {
+    console.warn("oauth", e);
+    gateMode("oauth", { err: /oauth_client/.test(e.message) ? "בקשת הכניסה לא הגיעה מכלי מוכר של yalla-sa, ולכן לא אושרה."
+      : e.status === 404 || e.status === 400 ? "פג תוקף בקשת הכניסה. פתח שוב את הכלי."
+      : errText(e) });
+  }
+}
 // returns true when the portal can open
 async function unlock() {
   await loadAccess();
   if (PROFILE && PROFILE.disabled) { await signOut(); gateMode("login", { err: ERR.disabled }); return false }
   if (PROFILE && PROFILE.must_change_password) { gateMode("finish"); return false }
   if (!OP && !PLATFORM) { gateMode("noaccess"); return false }
+  if (OAUTH_ID) { await oauthConsent(); return true }
   const nx = await nextUrl(); if (nx) { location.replace(nx); return true }
   await showPortal();
   return true;
@@ -208,6 +244,7 @@ $("#gateForm").addEventListener("submit", async e => {
       if (trust) try { const r = await fnAuth({ action: "trust_device", hours: TRUST_H }); lsSet(TRUST, String(Date.parse(r.expires_at))) } catch (e) { console.warn("trust_device", e) }
       await unlock();
     } else if (GMODE === "finish") { location.assign(DEADHEAD) }
+    else if (GMODE === "oauth") { location.replace("/") }
     else if (GMODE === "noaccess") { await signOut(); gateMode("login") }
   } catch (err) {
     m.className = "msg err"; m.textContent = errText(err); $("#gateBtn").disabled = false;
