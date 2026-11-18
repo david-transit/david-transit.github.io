@@ -49,6 +49,7 @@ h1{font-size:30px;margin:0;font-weight:700}
 .row{display:grid;grid-template-columns:36px 1fr auto;gap:4px 10px;padding:12px 14px;border-bottom:1px solid var(--ys-line);cursor:pointer;text-align:right;width:100%;background:none;border-inline:0;border-top:0}
 .row:hover{background:#FAFBFC} .row[aria-current=true]{background:var(--ys-tint)}
 .row .ini{grid-row:span 3;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--ys-grey-tint);color:var(--ys-muted);font-weight:700}
+.row .nm.num-only{text-align:right}
 .row .nm{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .tm{color:var(--ys-muted);font-size:13px;display:flex;align-items:center;gap:6px}
 .row .dot{width:8px;height:8px;border-radius:50%;background:var(--ys-primary)}

@@ -170,7 +170,14 @@ async function loadThread() {
   MSGS = await rows("support_messages", "select=id,direction,sender,agent_id,body,template,status,error,created_at&conversation_id=eq." + SEL + "&order=created_at.asc&limit=500");
   drawThread();
 }
-async function poll() { if (document.hidden) return; try { await loadList(); if (SEL) await loadThread() } catch { } }
+// RLS answers an aal1 session with empty lists, not an error: check the session first, so a code that was lost
+// (e.g. another tab refreshed to aal1) brings the code window back instead of an empty inbox (review I5)
+let stepping = null;
+async function ensureAal2() { if (aal() === "aal2") return true; return stepping ??= stepUp().finally(() => { stepping = null }) }
+async function poll() {
+  if (document.hidden) return;
+  try { if (!(await ensureAal2())) return; await loadList(); if (SEL) await loadThread() } catch { }
+}
 
 // ---------- list ----------
 function drawList() {
@@ -184,7 +191,7 @@ function drawList() {
     const handler = c.status === "assigned" ? (c.assignee ? agentName(c.assignee) : "בתור") : STATUS_HE[c.status];
     return `<li><button class="row" type="button" data-id="${c.id}" aria-current="${c.id === SEL}">
       <span class="ini" aria-hidden="true">${esc(initial(c.support_contacts?.wa_name))}</span>
-      <span class="nm" ${c.support_contacts?.wa_name ? "" : 'dir="ltr" style="text-align:right"'}>${esc(contactName(c))}</span>
+      <span class="nm${c.support_contacts?.wa_name ? "" : ' num-only'}" ${c.support_contacts?.wa_name ? "" : 'dir="ltr"'}>${esc(contactName(c))}</span>
       <span class="tm">${unread ? '<i class="dot" aria-label="הודעה חדשה"></i>' : ""}${esc(fmtTime(l?.created_at || c.created_at))}</span>
       <span class="pv">${esc(l?.body || "")}</span>
       <span class="hd chip">${esc(handler)}</span></button></li>`;
