@@ -646,13 +646,28 @@ async function drawStatus() {
       <div><b>${head}</b><span class="muted small">נבדק לאחרונה ${esc(hm(S.checked_at))} · נבדק כל שעה</span></div>
       <button type="button" class="btn-line small st-now">בדיקה עכשיו</button></div>
     ${ST_GRP.map(([g, t]) => { const rows = items.filter(i => i.grp === g); return rows.length ? `<section class="st-grp"><h3>${t}</h3><div class="st-card">${rows.map(stRow).join("")}</div></section>` : "" }).join("")}
-    <p class="st-foot muted small">${S.alert_channel === "off" ? "התראות כבויות: לא הוגדרו כתובות מייל" : `התראות במייל${S.alert_count ? ` ל־${esc(S.alert_count)} כתובות` : ""}: אדום – מיד · צהוב – סיכום ב־08:00`}</p>`;
+    <div class="st-foot"><p class="muted small">${S.alert_channel === "off" ? "התראות כבויות: לא הוגדרו כתובות מייל" : `התראות במייל${S.alert_count ? ` ל־${esc(S.alert_count)} כתובות` : ""}: אדום – מיד · צהוב – סיכום ב־08:00`}</p>
+      <button type="button" class="btn-line small st-emedit" aria-expanded="false" aria-controls="stEm">עריכת כתובות</button></div>
+    <form id="stEm" class="st-em" hidden novalidate>
+      <label for="stEmList">כתובות מייל להתראות – כתובת אחת בכל שורה (עד 10)</label>
+      <textarea id="stEmList" dir="ltr" rows="4" spellcheck="false" autocomplete="off">${esc((S.alert_emails || []).join("\n"))}</textarea>
+      <p class="muted small">בלי כתובות – ההתראות כבויות.</p>
+      <div class="st-em-btns"><button type="submit" class="btn-line small st-emsave">שמירה</button><button type="button" class="btn-line small st-emcancel">ביטול</button></div>
+      <p id="stEmMsg" class="msg" role="status"></p>
+    </form>`;
   // bar widths through the CSSOM: the site's CSP (style-src 'self') blocks inline style attributes
   for (const f of box.querySelectorAll(".st-bar [data-pct]")) f.style.width = f.dataset.pct + "%";
 }
 $("#cpBody").addEventListener("click", async e => {
   if (CTAB !== "status") return;
   if (e.target.closest(".st-retry")) return drawStatus();
+  const ed = e.target.closest(".st-emedit"), cancel = e.target.closest(".st-emcancel");
+  if (ed || cancel) {
+    const f = $("#stEm"), btn = $("#cpBody .st-emedit"), open = !!ed && f.hidden;
+    f.hidden = !open; btn.setAttribute("aria-expanded", String(open));
+    if (open) $("#stEmList").focus(); else { f.reset(); $("#stEmMsg").textContent = ""; btn.focus() }
+    return;
+  }
   const now = e.target.closest(".st-now"), mark = e.target.closest(".st-mark");
   if (!now && !mark) return;
   if (aal() !== "aal2") return cpDraw();
@@ -669,5 +684,28 @@ $("#cpBody").addEventListener("click", async e => {
     b.disabled = false;
     if (stForbidden(err)) return cpDraw();
     cmsg(errText(err), "err");
+  }
+});
+// status alert addresses (public.platform_status_set_emails: the server checks them again and replaces the whole list)
+const ST_EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+$("#cpBody").addEventListener("submit", async e => {
+  if (CTAB !== "status" || e.target.id !== "stEm") return;
+  e.preventDefault();
+  if (aal() !== "aal2") return cpDraw();
+  const msg = (t, c = "err") => { const m = $("#stEmMsg"); m.className = "msg " + c; m.textContent = t };
+  const list = [...new Set($("#stEmList").value.split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(Boolean))];
+  const bad = list.find(x => !ST_EMAIL.test(x) || x.length > 254);
+  if (bad) return msg(`הכתובת "${bad}" לא תקינה. תקן או מחק אותה`);
+  if (list.length > 10) return msg("אפשר עד 10 כתובות");
+  const b = e.target.querySelector("[type=submit]"); b.disabled = true;
+  try {
+    await stRpc("platform_status_set_emails", { p_emails: list });
+    if (CTAB !== "status") return;
+    await drawStatus(); cmsg(list.length ? "הכתובות נשמרו" : "הכתובות נמחקו – ההתראות כבויות", "ok");
+  } catch (err) {
+    b.disabled = false;
+    if (stForbidden(err)) return cpDraw();
+    const m = String(err && err.message || "");
+    msg(/bad_email/.test(m) ? "אחת הכתובות לא תקינה" : /too_many/.test(m) ? "אפשר עד 10 כתובות" : errText(err));
   }
 });

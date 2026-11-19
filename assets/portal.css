@@ -303,7 +303,13 @@ body.cp-open{overflow:auto}
 .st-bar>span{display:block;height:100%;border-radius:3px}
 .st-row[data-level="manual"] .st-name b,.st-row[data-level="unknown"] .st-read{color:var(--ys-muted)}
 .st-link{color:var(--ys-primary);font-size:14px;white-space:nowrap}
-.st-foot{margin:4px 0 0}
+.st-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 0}.st-foot p{margin:0;flex:1}
+.st-em{background:var(--ys-card);border:1px solid var(--ys-line);border-radius:var(--r);padding:14px 16px;margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.st-em label{font-weight:700}
+.st-em textarea{font:inherit;font-size:15px;padding:8px 10px;border:1px solid var(--ys-line);border-radius:8px;resize:vertical;text-align:left}
+.st-em .muted{margin:0}
+.st-em-btns{display:flex;gap:8px}
+.st-emsave{color:var(--ys-primary);border-color:var(--ys-primary);font-weight:700}
 .st-now{color:var(--ys-primary);border-color:var(--ys-primary);font-weight:700}
 @media (max-width:640px){
   .cp-tabs{overflow-x:auto;scrollbar-width:none;gap:0}
