@@ -152,7 +152,7 @@ function gateMode(m, { err = "", msg = "" } = {}) {
         <p><b>מנהל מערכת עם קוד שחזור?</b> <a href="${esc(DEADHEAD)}?recover=1">כניסה עם קוד שחזור</a> (נפתח בכלי תכנון נסיעות ריקות).</p>
       </div>`;
   } else if (m === "finish") { // forced password change: done in the deadhead tool (manage_users)
-    S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. עושים את זה פעם אחת בכלי תכנון נסיעות ריקות, ואז חוזרים לכאן.`;
+    S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. זה לוקח רגע, ומיד אחר כך חוזרים לדף הבית.`;
     F.innerHTML = ""; B.textContent = "המשך להשלמת החשבון";
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="logout">יציאה</button>`;
   } else if (m === "oauth") { // signing in to a tool through the portal (single gate)
@@ -248,7 +248,7 @@ $("#gateForm").addEventListener("submit", async e => {
       // personal device: recorded on the server for this session (listed and disconnectable in the control panel)
       if (trust) try { const r = await fnAuth({ action: "trust_device", hours: TRUST_H }); lsSet(TRUST, String(Date.parse(r.expires_at))) } catch (e) { console.warn("trust_device", e) }
       await unlock();
-    } else if (GMODE === "finish") { location.assign(DEADHEAD) }
+    } else if (GMODE === "finish") { location.assign(DEADHEAD + "?then=portal") } // after the new password the tool sends him back here
     else if (GMODE === "oauth") { location.replace("/") }
     else if (GMODE === "noaccess") { await signOut(); gateMode("login") }
   } catch (err) {
