@@ -335,7 +335,8 @@ function drawMatrix() {
   const editOp = u => opF ? opF.id : orgsOf(u).length === 1 ? orgsOf(u)[0] : !orgsOf(u).length && AO.length === 1 ? AO[0].id : "";
   const chips = ms => [...new Set(ms.map(m => m.role))].map(r => `<span class="chip">${esc(ROLEHE[r] || r)}</span>`).join("") || '<span class="muted">—</span>';
   const cell = (u, t) => {
-    if (t.status !== "live") return '<span class="muted" title="הכלי עוד לא פעיל">—</span>';
+    // a "soon" tool can already be granted (the notices tiles, 2026-11-19): access is ready the day it goes live
+    if (t.status !== "live" && t.status !== "soon") return '<span class="muted" title="הכלי עוד לא פעיל">—</span>';
     if (u.platform) return '<span class="chip chip-plat">מנהל מערכת</span>';
     const op = editOp(u), ms = grantsOf(u, t.module).filter(m => !opF || m.operator_id === opF.id);
     if (u.manageable && !op) return `<span title="משויך לכמה ארגונים: כדי לשנות, בחר ארגון בתיבת המפעיל">${chips(ms)}</span>`;

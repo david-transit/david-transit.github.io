@@ -148,7 +148,7 @@ button,input,select{font:inherit;color:inherit}
 .cp-btn[aria-pressed="true"]{background:var(--ys-tint)}
 .cp-shade{position:fixed;inset:72px 0 0 0;background:rgba(29,35,48,.38);z-index:20}
 /* a screen of its own (David 2026-11-19): in the page flow under the top bar, the page scrolls, back = the logo */
-.cp{position:static;width:auto;max-width:1280px;margin:0 auto;background:transparent;display:block;padding:22px 28px 48px;overflow:visible}
+.cp{position:static;width:100%;min-width:0;max-width:1280px;margin:0 auto;background:transparent;display:block;padding:22px 28px 48px;overflow:visible}
 body.cp-open main.content{display:none}
 .cp-shade{display:none!important}
 .cp-x{display:none}
