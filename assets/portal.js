@@ -132,7 +132,7 @@ const roleAt = (op, module = "deadhead") => PLATFORM ? "admin" : !op ? null
   : (TR.find(m => m.operator_id === op.id && m.module === module)?.role || null);
 
 // ---------- gate ----------
-let GMODE = "login";
+let GMODE = "login", LASTPW = null;
 const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const fld = (id, label, type, ac, extra = "") => `<div class="field"><label for="${id}">${label}</label>${type === "password"
   ? `<div class="pw-wrap"><input id="${id}" type="password" autocomplete="${ac}" dir="ltr" required ${extra}><button type="button" class="eye" data-eye="${id}" aria-label="הצגת הסיסמה" aria-pressed="false">${EYE}</button></div>`
@@ -151,9 +151,13 @@ function gateMode(m, { err = "", msg = "" } = {}) {
         <p><b>שכחת סיסמה או שאין לך חשבון?</b> פנה למנהל המערכת אצל המפעיל שלך. הוא יכול לאפס לך סיסמה או ליצור לך משתמש.</p>
         <p><b>מנהל מערכת עם קוד שחזור?</b> <a href="${esc(DEADHEAD)}?recover=1">כניסה עם קוד שחזור</a> (נפתח בכלי תכנון נסיעות ריקות).</p>
       </div>`;
-  } else if (m === "finish") { // forced password change: done in the deadhead tool (manage_users)
-    S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. זה לוקח רגע, ומיד אחר כך חוזרים לדף הבית.`;
-    F.innerHTML = ""; B.textContent = "המשך להשלמת החשבון";
+  } else if (m === "finish") { // forced password change, here in the portal (David 2026-11-19; manage_users change_password)
+    S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. הסיסמה הזמנית משמשת רק לכניסה הראשונה.`;
+    F.innerHTML = (LASTPW ? "" : fld("gpw0", "הסיסמה הזמנית", "password", "current-password"))
+      + fld("gpw", "סיסמה חדשה", "password", "new-password", 'aria-describedby="gpwChk"')
+      + '<div class="msg pwchk muted" id="gpwChk" aria-live="polite">לפחות 8 תווים, עם אותיות באנגלית ומספרים</div>'
+      + fld("gpw2", "הסיסמה החדשה שוב", "password", "new-password");
+    B.textContent = "שמירת הסיסמה והמשך";
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="logout">יציאה</button>`;
   } else if (m === "oauth") { // signing in to a tool through the portal (single gate)
     S.textContent = err ? "הכניסה לכלי לא הושלמה." : "מעביר אותך לכלי…";
@@ -236,7 +240,7 @@ $("#gateForm").addEventListener("keydown", e => {
   if (/[֐-׿]/.test(e.key || "")) { $("#gateWarn").textContent = "שים לב: המקלדת בעברית. עבור לאנגלית (Alt+Shift) לפני הקלדת שם המשתמש והסיסמה."; return }
   kbWarn();
 });
-$("#gateForm").addEventListener("input", kbWarn);
+$("#gateForm").addEventListener("input", e => { kbWarn(); if (e.target.id === "gpw" && GMODE === "finish") pwShow(e.target, $("#gpwChk")) });
 $("#gateForm").addEventListener("submit", async e => {
   e.preventDefault(); const m = $("#gateMsg"); m.className = "msg"; m.textContent = "רגע…"; $("#gateBtn").disabled = true;
   try {
@@ -244,11 +248,19 @@ $("#gateForm").addEventListener("submit", async e => {
       const user = $("#gUser").value.trim().toLowerCase(), pw = $("#gpw").value; $("#gUser").value = user;
       if (!user || !pw) throw new Error("invalid_credentials");
       const trust = !!$("#gTrust")?.checked;
-      await signIn(user, pw); lsSet(TRUST, null);
+      await signIn(user, pw); lsSet(TRUST, null); LASTPW = pw; // kept in memory only, for a forced password change right after
       // personal device: recorded on the server for this session (listed and disconnectable in the control panel)
       if (trust) try { const r = await fnAuth({ action: "trust_device", hours: TRUST_H }); lsSet(TRUST, String(Date.parse(r.expires_at))) } catch (e) { console.warn("trust_device", e) }
       await unlock();
-    } else if (GMODE === "finish") { location.assign(DEADHEAD + "?then=portal") } // after the new password the tool sends him back here
+    } else if (GMODE === "finish") {
+      const cur = LASTPW || $("#gpw0").value, pw = $("#gpw").value;
+      if (!cur) throw new Error("wrong_password");
+      if (weakPw(pw)) { pwShow($("#gpw"), $("#gpwChk")); throw new Error("weak_password") }
+      if (pw !== $("#gpw2").value) throw new Error("הסיסמאות לא זהות");
+      await fnAuth({ action: "change_password", current_password: cur, new_password: pw }); // asks for the 2-step code when needed
+      await signIn(PROFILE?.username || lsGet("ys_user") || "", pw); LASTPW = null; // a password change ends the old sessions
+      await unlock();
+    }
     else if (GMODE === "oauth") { location.replace("/") }
     else if (GMODE === "noaccess") { await signOut(); gateMode("login") }
   } catch (err) {
