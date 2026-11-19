@@ -236,9 +236,9 @@ async function ctlDo(body, okText) {
 let CARD = null, PENDING = null; // CARD = { id, op (operator shown and edited), mail (saved email, once read) }
 const canCard = u => !!u && (u.me || (PLATFORM && u.manageable));
 const PENCIL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>';
-// live tools only: the server accepts only them (TOOL_MODULES). The notices branch adds its "soon" tools here together
-// with widening TOOL_MODULES on the server (review 2026-11-19: a row the server refuses only shows an error).
-const cardTools = () => (TILES || []).filter(t => t.module && t.status === "live");
+// live tools, and "soon" tools that can already be granted (the notices tools, merged 2026-11-19; the server accepts
+// them since manage_users v20: TOOL_MODULES = studio, notice-check, notice-create), so access is ready the day they go live
+const cardTools = () => (TILES || []).filter(t => t.module && (t.status === "live" || t.status === "soon"));
 const roleAtOp = (u, mod, op) => (grantsOf(u, mod).find(m => m.operator_id === op) || {}).role || "none";
 const initials = u => { const w = (u.display_name || "").trim().split(/\s+/).filter(Boolean); return w.length ? w.slice(0, 2).map(x => x[0]).join("") : (u.username || "?").slice(0, 2).toUpperCase() };
 const dmy = x => { const d = x ? new Date(x) : null; return d && !isNaN(d) ? d.toLocaleDateString("he-IL", { timeZone: "Asia/Jerusalem", day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, ".") : "" };
