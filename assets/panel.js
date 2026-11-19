@@ -362,7 +362,9 @@ function newOpen() {
   $("#nOp").innerHTML = (PLATFORM ? '<option value="platform">מנהל מערכת (כל המפעילים)</option>' : "") +
     (AO.length ? `<optgroup label="מפעיל">${AO.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}</optgroup>` : "");
   if (!PLATFORM && AO[0]) $("#nOp").value = AO[0].id;
-  $("#nRole").innerHTML = ROLES.filter(r => r !== "admin" || PLATFORM).map(r => `<option value="${r}"${r === "editor" ? " selected" : ""}>${ROLEHE[r]}</option>`).join("");
+  // a role per live tool (David 2026-11-19); every tool starts at "no access", so nothing is granted by accident
+  $("#nTools").innerHTML = (TILES || []).filter(t => t.module && t.status === "live").map(t => `<label class="ntool"><span>${esc(t.title)}</span>
+    <select data-mod="${esc(t.module)}" aria-label="הרשאה ב${esc(t.title)}"><option value="none">אין גישה</option>${ROLES.filter(r => r !== "admin" || PLATFORM).map(r => `<option value="${r}">${ROLEHE[r]}</option>`).join("")}</select></label>`).join("");
   for (const id of ["nName", "nUser", "nPw", "nEmail"]) $("#" + id).value = "";
   mailMode();
   $("#nRoleBox").hidden = $("#nOp").value === "platform"; pwShow($("#nPw"), $("#nPwChk")); $("#nMsg").textContent = "";
@@ -380,22 +382,26 @@ $("#nUser").addEventListener("focusout", e => { e.target.value = e.target.value.
 $("#newForm").addEventListener("submit", async e => {
   e.preventDefault(); const m = $("#nMsg"), user = $("#nUser").value.trim().toLowerCase(), pw = $("#nPw").value, op = $("#nOp").value;
   if (!USERRE.test(user)) { m.className = "msg err"; m.textContent = ERR.bad_username; $("#nUser").focus(); return }
-  const role = op === "platform" ? "platform" : $("#nRole").value, email = $("#nEmail").value.trim().toLowerCase();
+  const picks = [...$("#nTools").querySelectorAll("select[data-mod]")].map(s => ({ module: s.dataset.mod, role: s.value }));
+  const dh = (picks.find(x => x.module === "deadhead") || { role: "none" }).role, tools = picks.filter(x => x.module !== "deadhead" && x.role !== "none");
+  const role = op === "platform" ? "platform" : dh, email = $("#nEmail").value.trim().toLowerCase();
+  const noAccess = op !== "platform" && dh === "none" && !tools.length
+    ? ` שים לב: למשתמש ${user} אין גישה לאף כלי. אפשר לקבוע בלשונית "הרשאות לפי כלי".` : "";
   if (email && !mailOk()) { m.className = "msg err"; m.textContent = DETAILS_MSG.bad_email; $("#nEmail").focus(); return }
   if (!email && weakPw(pw)) { pwShow($("#nPw"), $("#nPwChk")); m.className = "msg err"; m.textContent = ERR.weak_password; $("#nPw").focus(); return }
   m.className = "msg"; m.textContent = "יוצר…"; $("#nSave").disabled = true;
   try {
     const name = $("#nName").value.trim();
     // with an email the password typed here is never used: send_details replaces it and mails a fresh one
-    const r = await fnAuth({ action: "create", username: user, display_name: name, ...(role === "platform" ? {} : { operator_id: op }), role,
+    const r = await fnAuth({ action: "create", username: user, display_name: name, ...(role === "platform" ? {} : { operator_id: op, tools }), role,
       password: email ? suggestPw() : pw, ...(email ? { email } : {}) });
     $("#dlgNew").close(); CTAB = "users"; await cpDraw(true);
-    if (!email) { cmsg(`נוצר המשתמש ${user} עם הסיסמה הזמנית ${pw} . העבר לו את שניהם. בכניסה הראשונה הוא יבחר סיסמה חדשה.`, "ok"); return }
+    if (!email) { cmsg(`נוצר המשתמש ${user} עם הסיסמה הזמנית ${pw} . העבר לו את שניהם. בכניסה הראשונה הוא יבחר סיסמה חדשה.${noAccess}`, "ok"); return }
     cmsg("נוצר המשתמש. שולח מייל…");
     try {
       await fnAuth({ action: "send_details", user_id: r.user_id });
       CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
-      cmsg(`נוצר המשתמש ${user} ונשלח אליו מייל עם פרטי הכניסה ל־${email}.`, "ok");
+      cmsg(`נוצר המשתמש ${user} ונשלח אליו מייל עם פרטי הכניסה ל־${email}.${noAccess}`, "ok");
     } catch (se) {
       cmsg(`נוצר המשתמש ${user}, אבל המייל לא נשלח: ${detailsErr(se)} אפשר לשלוח שוב מתפריט ⋯ ← מייל ושליחת פרטים.`, "err");
     }
