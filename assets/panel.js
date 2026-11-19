@@ -633,8 +633,8 @@ async function drawStatus() {
   try { S = await stRpc("platform_status") }
   catch (e) {
     if (!live()) return;
-    if (stForbidden(e)) { if (aal() !== "aal2") return cpDraw(); box.innerHTML = '<p class="cp-empty">רק מנהל מערכת עם קוד אימות רואה את מצב הפלטפורמה.</p>'; return }
-    box.innerHTML = `<div class="cp-empty"><p class="msg err">לא ניתן לטעון את מצב הפלטפורמה</p><button type="button" class="btn-line small st-retry">נסה שוב</button></div>`; return;
+    if (stForbidden(e)) { if (aal() !== "aal2") return cpDraw(); box.innerHTML = '<p class="cp-empty">רק מנהל מערכת עם קוד אימות רואה את לוח המדדים.</p>'; return }
+    box.innerHTML = `<div class="cp-empty"><p class="msg err">לא ניתן לטעון את לוח המדדים</p><button type="button" class="btn-line small st-retry">נסה שוב</button></div>`; return;
   }
   if (!live()) return;
   const items = S.items || [];
