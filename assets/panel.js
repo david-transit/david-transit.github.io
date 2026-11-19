@@ -1,5 +1,6 @@
 // yalla-sa control panel (פאנל בקרה), moved here from the deadhead tool's "חדר בקרה · משתמשים והרשאות".
-// Tabs: users, permissions per tool, my security. Every write goes through the manage_users Edge Function, which
+// Tabs: users (each user's card opens from the pencil on his row: details, permissions per tool, password, danger zone),
+// my security. Every write goes through the manage_users Edge Function, which
 // checks the caller again (platform admin: everyone; operator admin: viewers/editors of his operators; MFA aal2).
 // RLS in the database stays the real enforcement: this screen only shows and asks.
 // Per tool, a separate role per operator (bug fixed 2026-11-19: one shared role changed both tools):
@@ -79,21 +80,25 @@ const DETAILS_MSG = {
 const detailsErr = e => { const m = String(e && e.message || e); for (const k in DETAILS_MSG) if (m.includes(k)) return DETAILS_MSG[k]; return errText(e) };
 const LOCK = '<svg class="lk" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>';
 
-let CTL = null, CTAB = "users", CFILTER = "", CQ = "", CMENU = null;
+let CTL = null, CTAB = "users", CQ = "";
 const P = () => $("#cp");
 const cmsg = (t, cls = "") => { const m = $("#cpMsg"); m.className = "msg " + cls; m.textContent = t; if (t) m.scrollIntoView({ block: "nearest" }) };
 
 // ---------- open / close ----------
 function cpSetup() { // called after the portal opens (portal.js showPortal)
   $("#cpBtn").hidden = !canManage();
-  for (const t of ["users", "matrix"]) $(`#cpTabs [data-tab="${t}"]`).hidden = !canManage();
-  // a tool's "users and permissions" link lands here with ?panel=users|matrix|sec
-  const q = new URL(location.href), want = q.searchParams.get("panel");
-  if (want) { q.searchParams.delete("panel"); history.replaceState(null, "", q.pathname + q.search); if (["users", "matrix", "sec"].includes(want)) cpOpen(want) }
+  $('#cpTabs [data-tab="users"]').hidden = !canManage();
+  // a tool's "users and permissions" link lands here with ?panel=users|sec (matrix = the old tab: users); &user=<id> opens his card
+  const q = new URL(location.href), want = q.searchParams.get("panel"), who = q.searchParams.get("user");
+  if (want) {
+    q.searchParams.delete("panel"); q.searchParams.delete("user"); history.replaceState(null, "", q.pathname + q.search);
+    if (["users", "matrix", "sec"].includes(want)) { if (who && want !== "sec") PENDING = { id: who, push: true }; cpOpen(want) }
+  }
 }
 let cpReturn = null;
 async function cpOpen(tab) {
   cpReturn = document.activeElement; toggleMenu(null, false);
+  if (tab === "matrix") tab = "users"; // the per-tool tab became the user card (spec §11)
   CTAB = canManage() ? tab || CTAB : "sec";
   let st = "ok", note = "";
   if (CTAB !== "sec") { // the code is asked here, when the panel opens, not at sign-in
@@ -111,26 +116,34 @@ function cpClose(fromHistory) {
   if (P().hidden) return;
   if (!fromHistory && /[?&]panel=/.test(location.search)) history.replaceState(null, "", location.pathname);
   P().hidden = true; $("#cpShade").hidden = true; document.body.classList.remove("cp-open"); $("#cpBtn").setAttribute("aria-pressed", "false");
-  const d = $("#dlgNew"); if (d.open) d.close(); closeRowMenu();
+  const d = $("#dlgNew"); if (d.open) d.close(); CARD = null; PENDING = null;
   (cpReturn && cpReturn.isConnected ? cpReturn : $("#cpBtn")).focus?.();
 }
 $("#cpBtn").addEventListener("click", () => P().hidden ? cpOpen("users") : cpClose());
 $("#cpClose").addEventListener("click", () => cpClose());
 // the logo goes back to the home page (as in the deadhead dashboard), without reloading when the panel is open
 document.querySelector("header.top .brand").addEventListener("click", e => { if (!P().hidden) { e.preventDefault(); cpClose() } });
-window.addEventListener("popstate", () => { if (!/[?&]panel=/.test(location.search)) cpClose(true) });
+// back / forward: no panel -> home; into the panel again -> open it; ?user= -> that card; no ?user= -> the list
+window.addEventListener("popstate", () => {
+  const q = new URLSearchParams(location.search), panel = q.get("panel"), who = q.get("user");
+  if (!panel) return cpClose(true);
+  if (P().hidden) { if (who) PENDING = { id: who, push: false }; return cpOpen(panel) }
+  if (who && panel === "users" && CTL && (CARD && CARD.id === who || openCard(who, false))) return;
+  if (CARD) { CTAB = "users"; leaveCard() }
+});
 $("#cpShade").addEventListener("click", () => cpClose());
 $("#userMenu").addEventListener("click", e => { if (e.target.closest("[data-act=security]")) cpOpen("sec") });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape" || P().hidden || $("#dlgNew").open) return;
-  if (CMENU) { closeRowMenu(true); return } cpClose();
+  if (CARD) { history.back(); return } cpClose();
 });
-$("#cpTabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) { CTAB = b.dataset.tab; cmsg(""); cpDraw() } });
+const leaveCardUrl = () => { if (CARD) { CARD = null; history.replaceState({ cp: 1 }, "", "?panel=users") } };
+$("#cpTabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) { leaveCardUrl(); CTAB = b.dataset.tab; cmsg(""); cpDraw() } });
 $("#cpTabs").addEventListener("keydown", e => { // arrow keys move between tabs (RTL: right = previous)
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
   const tabs = [...$("#cpTabs").querySelectorAll("[data-tab]:not([hidden])")], i = tabs.indexOf(document.activeElement); if (i < 0) return;
   const n = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowLeft" ? 1 : -1) + tabs.length) % tabs.length;
-  e.preventDefault(); CTAB = tabs[n].dataset.tab; cpDraw(); tabs[n].focus();
+  e.preventDefault(); leaveCardUrl(); CTAB = tabs[n].dataset.tab; cpDraw(); tabs[n].focus();
 });
 
 async function cpDraw(reload = false) {
@@ -146,7 +159,8 @@ async function cpDraw(reload = false) {
     try { [CTL] = await Promise.all([fnAuth({ action: "list" }), loadTiles()]) }
     catch (e) { box.innerHTML = `<p class="msg err">${esc(errText(e))}</p>`; return }
   }
-  if (CTAB === "users") drawUsers(); else drawMatrix();
+  if (PENDING) { const w = PENDING; PENDING = null; if (openCard(w.id, w.push)) return; if (!w.push) history.replaceState({ cp: 1 }, "", "?panel=users") }
+  if (CARD && userOf(CARD.id)) drawCard(); else { CARD = null; drawUsers() }
 }
 
 // ---------- users ----------
@@ -202,89 +216,208 @@ function drawUsers() {
         <span role="cell" class="cp-acc">${accessOf(u)}</span>
         <span role="cell" class="cp-st">${statusOf(u)}</span>
         <span role="cell" class="cp-last"><span class="cp-lbl">כניסה אחרונה: </span>${lastSeen(u)}</span>
-        <span role="cell" class="cp-act">${u.manageable || u.me ? `<button type="button" class="dots" data-menu aria-haspopup="true" aria-expanded="false" aria-label="פעולות על ${esc(u.username)}">⋯</button>` : ""}</span>
-        <div class="cp-reset" data-resetbox hidden></div></div>`).join("") || '<p class="cp-empty">אין משתמשים שמתאימים לחיפוש</p>'}
+        <span role="cell" class="cp-act">${canCard(u) ? `<button type="button" class="pencil" data-edit aria-label="עריכת ${esc(u.username)}" title="עריכה">${PENCIL}</button>` : ""}</span></div>`).join("") || '<p class="cp-empty">אין משתמשים שמתאימים לחיפוש</p>'}
     </div>
     <p class="hint">מי ששכח סיסמה פונה למנהל המערכת, שלוחץ "איפוס סיסמה": למשתמש עם מייל נשלחת סיסמה זמנית במייל; בלי מייל המנהל מעביר לו אותה. בכניסה הבאה הוא בוחר סיסמה חדשה.</p>`;
 }
-const userOf = id => CTL.users.find(u => u.user_id === id);
-function closeRowMenu(focusBack) {
-  if (!CMENU) return; const b = CMENU.btn; CMENU.el.remove(); b.setAttribute("aria-expanded", "false"); CMENU = null; if (focusBack) b.focus();
-}
-function openRowMenu(btn) {
-  closeRowMenu(); const u = userOf(btn.closest("[data-u]").dataset.u);
-  const items = u.manageable ? [["name", "עריכת שם"], ["reset", "איפוס סיסמה"], PLATFORM ? ["mail", "עדכון כתובת מייל"] : null, u.mfa ? ["mfar", "איפוס אימות דו־שלבי"] : null,
-    PLATFORM ? ["plat", u.platform ? "הסרת מנהל מערכת" : "הפיכה למנהל מערכת"] : null,
-    ["dis", u.disabled ? "הפעלה" : "השבתה"], ["del", "מחיקה"]].filter(Boolean) : [["name", "עריכת השם שלי"]];
-  const el = document.createElement("div"); el.className = "rowmenu"; el.setAttribute("role", "menu");
-  el.innerHTML = items.map(([k, t]) => `<button type="button" role="menuitem" data-do="${k}"${k === "del" ? ' class="danger"' : ""}>${t}</button>`).join("");
-  btn.parentNode.append(el); btn.setAttribute("aria-expanded", "true"); CMENU = { el, btn }; el.querySelector("button").focus();
-}
+const userOf = id => CTL && (CTL.users || []).find(u => u.user_id === id);
 async function ctlDo(body, okText) {
   cmsg("שומר…");
   try { await fnAuth(body); CTL = await fnAuth({ action: "list" }); cpDraw(); cmsg(okText, "ok"); return true }
-  catch (e) { cmsg(errText(e), "err"); return false }
+  catch (e) { cmsg(errText(e), "err"); cpDraw(); return false }
+}
+
+// ---------- user card (spec §11, David 2026-11-19) ----------
+// The pencil on a row opens a screen of its own inside the panel (?panel=users&user=<id>). A platform admin edits
+// everything here; on his own card anyone edits only the display name; an operator admin has no pencil on others (D5).
+// The username never changes (D11). Permission changes save at once; "שמירת שינויים" saves the name and the email.
+let CARD = null, PENDING = null; // CARD = { id, op (operator shown and edited), mail (saved email, once read) }
+const canCard = u => !!u && (u.me || (PLATFORM && u.manageable));
+const PENCIL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>';
+const cardTools = () => (TILES || []).filter(t => t.module && (t.status === "live" || t.status === "soon")); // "soon" tools can be granted ahead (notices)
+const roleAtOp = (u, mod, op) => (grantsOf(u, mod).find(m => m.operator_id === op) || {}).role || "none";
+const initials = u => { const w = (u.display_name || "").trim().split(/\s+/).filter(Boolean); return w.length ? w.slice(0, 2).map(x => x[0]).join("") : (u.username || "?").slice(0, 2).toUpperCase() };
+const dmy = x => { const d = x ? new Date(x) : null; return d && !isNaN(d) ? d.toLocaleDateString("he-IL", { timeZone: "Asia/Jerusalem", day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, ".") : "" };
+// the operator a card edits: the first operator the user belongs to, or (no access yet) the first one the caller manages
+const firstOp = u => { const ids = adminOps().map(o => o.id); return orgsOf(u).find(id => ids.includes(id)) || ids[0] || "" };
+// Option A (David, 2026-11-19, notices session): the notices module runs inside the planning tool, whose database also
+// checks the planning role. A warning only, never a block; removed when option B separates notices from the planning tool.
+const NOTICE_NEEDS_STUDIO = "כדי לעבוד בפרסומים צריך גם תפקיד בכלי התכנון", CREATE_NEEDS_EDITOR = "יוצר פרסומים צריך גם עורך בכלי התכנון";
+function noticeWarn(u, op) {
+  if (u.platform) return [];
+  const g = (u.tools || []).filter(m => m.operator_id === op), out = new Set();
+  for (const n of g.filter(m => m.module === "notice-check" || m.module === "notice-create")) {
+    const studio = g.find(m => m.module === "studio");
+    if (!studio) out.add(NOTICE_NEEDS_STUDIO);
+    else if (n.module === "notice-create" && (RANK[n.role] || 0) >= RANK.editor && (RANK[studio.role] || 0) < RANK.editor) out.add(CREATE_NEEDS_EDITOR);
+  }
+  return [...out];
+}
+// open a card: false (and nothing changes) for an unknown user or one the caller may not edit
+function openCard(id, push = true) {
+  const u = userOf(id); if (!canCard(u)) return false;
+  CARD = { id, op: firstOp(u) };
+  if (push) history.pushState({ cp: 1 }, "", "?panel=users&user=" + encodeURIComponent(id));
+  CTAB = "users"; cmsg(""); drawCard(); window.scrollTo(0, 0); $("#ucName")?.focus();
+  return true;
+}
+function leaveCard() { // back to the list, focus on the pencil of the user just left
+  const id = CARD && CARD.id; CARD = null; drawUsers();
+  if (id) document.querySelector(`.cp-tr[data-u="${CSS.escape(id)}"] [data-edit]`)?.focus();
+}
+function drawCard(keep = {}) {
+  const u = userOf(CARD.id);
+  if (!u) { CARD = null; history.replaceState({ cp: 1 }, "", "?panel=users"); drawUsers(); return }
+  const full = !u.me, nm = u.display_name || u.username, op = CARD.op, orgs = orgsOf(u);
+  const chips = [u.disabled ? ["מושבת", "off"] : u.must_change ? ["צריך להחליף סיסמה", ""] : ["פעיל", "ok"], u.mfa ? ["אימות דו־שלבי פעיל", ""] : null, u.platform ? ["מנהל מערכת", ""] : null]
+    .filter(Boolean).map(([t, c]) => `<span class="uc-chip${c ? " uc-chip-" + c : ""}">${t}</span>`).join("");
+  const created = dmy(u.created_at), mail = keep.mail != null ? keep.mail : CARD.mail;
+  const details = `<section class="uc-box" data-box="details" aria-labelledby="ucH1"><h3 id="ucH1">פרטי המשתמש</h3>
+      <label for="ucDisp">שם תצוגה</label><input id="ucDisp" maxlength="80" autocomplete="off" value="${esc(keep.disp != null ? keep.disp : u.display_name || "")}">
+      <label for="ucUser">שם משתמש</label><input id="ucUser" dir="ltr" readonly value="${esc(u.username)}" aria-describedby="ucUserNote">
+      <p class="muted small" id="ucUserNote">שם המשתמש לא משתנה. לשם אחר יוצרים משתמש חדש.</p>
+      ${full ? `<label for="ucMail">כתובת מייל</label><input id="ucMail" type="email" dir="ltr" maxlength="254" autocomplete="off" aria-describedby="ucMailNote"${mail == null ? ' disabled placeholder="טוען…"' : ` value="${esc(mail)}"`}>
+      <p class="muted small" id="ucMailNote">הזן כתובת רק אחרי שהעובד הסכים לקבל מייל ממערכת יאללה־סע. השמירה לא שולחת מייל: סיסמה חדשה נשלחת מ"איפוס סיסמה".</p>` : ""}
+      <button type="button" class="btn-blue" id="ucSave">שמירת שינויים</button></section>`;
+  let rest = "";
+  if (full) {
+    const opHint = !orgs.length ? "המשתמש עוד בלי גישה: בחר לאיזה מפעיל יתווספו ההרשאות."
+      : orgs.length === 1 ? "בחירת מפעיל אחר מעבירה אליו את כל ההרשאות של המשתמש." : "המשתמש משויך לכמה מפעילים: הבחירה מחליפה איזה מפעיל מוצג ונערך.";
+    const rows = cardTools().map(t => { const cur = roleAtOp(u, t.module, op);
+      return `<div class="uc-tool" data-tool="${esc(t.module)}"><label for="ucr-${esc(t.module)}">${esc(t.title)}${t.status !== "live" ? ' <span class="soon">בקרוב</span>' : ""}</label>
+        <select id="ucr-${esc(t.module)}" data-ucrole data-mod="${esc(t.module)}"${u.platform ? " disabled" : ""}>${u.platform ? '<option>מנהל מערכת</option>'
+          : `<option value="none"${cur === "none" ? " selected" : ""}>אין גישה</option>${ROLES.map(r => `<option value="${r}"${r === cur ? " selected" : ""}>${ROLEHE[r]}</option>`).join("")}`}</select></div>` }).join("");
+    const warn = noticeWarn(u, op).map(w => `<p class="uc-warn" role="note">${esc(w)}</p>`).join("");
+    rest = `<section class="uc-box" data-box="perms" aria-labelledby="ucH2"><h3 id="ucH2">הרשאות לפי כלי</h3>
+        <div class="uc-tools">${rows}</div>${warn}
+        <p class="muted small">צופה: רואה הכול. עורך: גם משנה הגדרות. מנהל: גם רואה את המשתמשים של המפעיל.${u.platform ? " מנהל מערכת: הכול, בכל המפעילים." : ""}</p>
+        <div class="uc-tool uc-op"><label for="ucOp">מפעיל</label><select id="ucOp" aria-describedby="ucOpNote"${u.platform ? " disabled" : ""}>${adminOps().map(o => `<option value="${esc(o.id)}"${o.id === op ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></div>
+        <p class="muted small" id="ucOpNote">${opHint}</p>
+        <label class="uc-switch"><input type="checkbox" role="switch" id="ucPlat"${u.platform ? " checked" : ""}><span>מנהל מערכת (כל המפעילים)</span></label></section>
+      <section class="uc-box" data-box="pass" aria-labelledby="ucH3"><h3 id="ucH3">סיסמה וכניסה</h3>
+        <div class="uc-act"><button type="button" class="btn-line" id="ucReset">איפוס סיסמה</button>
+          <span class="muted small" id="ucResetNote">${u.has_email ? (mail ? `תישלח סיסמה זמנית חדשה למייל ${esc(CARD.mail || mail)}, בתוקף 7 ימים.` : "תישלח סיסמה זמנית חדשה למייל השמור, בתוקף 7 ימים.") : "אין מייל שמור: תוצג כאן סיסמה זמנית, ואתה מעביר אותה לעובד."}</span></div>
+        <div class="cp-reset" data-resetbox hidden></div>
+        ${u.mfa ? `<div class="uc-act"><button type="button" class="btn-line" id="ucMfa">איפוס אימות דו־שלבי</button>
+          <span class="muted small">${u.platform || u.memberships.some(m => m.role === "admin") ? "בכניסה הבאה המשתמש יגדיר אימות מחדש." : "בכניסה הבאה המשתמש ייכנס בסיסמה בלבד."}</span></div>` : ""}</section>
+      <section class="uc-box uc-danger" data-box="danger" aria-labelledby="ucH4"><h3 id="ucH4">אזור מסוכן</h3>
+        <div class="uc-act"><button type="button" class="btn-line danger" id="ucDis">${u.disabled ? "הפעלת המשתמש" : "השבתת המשתמש"}</button>
+          <span class="muted small">${u.disabled ? "המשתמש יוכל להיכנס שוב." : "המשתמש לא יוכל להיכנס עד שתפעיל אותו מחדש."}</span></div>
+        <div class="uc-act"><button type="button" class="btn-red" id="ucDel">מחיקת המשתמש</button><span class="muted small">פעולה שאי אפשר לבטל.</span></div></section>`;
+  }
+  $("#cpBody").innerHTML = `<div id="ucard" data-user="${esc(u.user_id)}">
+    <nav class="uc-crumbs muted small" aria-label="מיקום">לוח בקרה › <button type="button" class="link-btn" data-ucback>משתמשים</button> › ${esc(nm)}</nav>
+    <div class="uc-head"><span class="uc-av" aria-hidden="true">${esc(initials(u))}</span>
+      <div><h2 id="ucName" tabindex="-1">${esc(nm)}</h2><p class="muted"><span dir="ltr">${esc(u.username)}</span>${created ? ` · נוצר ${esc(created)}` : ""}</p></div>
+      <div class="uc-chips">${chips}</div></div>
+    <div class="uc-grid${full ? "" : " uc-one"}">${details}${rest}</div></div>`;
+  if (full && CARD.mail == null) loadCardMail(u);
+}
+// the saved email (platform admin only): read once per card; the field stays disabled until it is here
+async function loadCardMail(u) {
+  const id = u.user_id; let em = "";
+  if (u.has_email) { try { em = (await fnAuth({ action: "get_contact_email", user_id: id })).email || "" } catch (e) { cmsg(errText(e), "err") } }
+  if (!CARD || CARD.id !== id) return;
+  CARD.mail = em; const i = $("#ucMail"); if (!i) return;
+  i.value = em; i.disabled = false; i.removeAttribute("placeholder");
+  if (u.has_email && em) $("#ucResetNote").textContent = `תישלח סיסמה זמנית חדשה למייל ${em}, בתוקף 7 ימים.`;
+}
+const cleanMail = v => v.trim().toLowerCase();
+const mailValid = (i, v) => !v || (i.checkValidity() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)); // same rule as the server
+async function saveCard() {
+  const u = userOf(CARD.id), n = u.username, di = $("#ucDisp"), disp = di.value.trim(), mi = $("#ucMail");
+  if (!disp) { cmsg("צריך לכתוב שם", "err"); di.focus(); return }
+  const mail = mi && !mi.disabled ? cleanMail(mi.value) : null;
+  let nameCh = disp !== (u.display_name || ""), mailCh = mail != null && mail !== (CARD.mail || "");
+  if (mailCh && !mailValid(mi, mail)) { cmsg(DETAILS_MSG.bad_email, "err"); mi.focus(); return }
+  if (mailCh && !mail && !confirm(`להסיר את כתובת המייל של ${n}?`)) mailCh = false;
+  if (!nameCh && !mailCh) { cmsg("אין שינויים לשמירה"); return }
+  cmsg("שומר…"); $("#ucSave").disabled = true;
+  const parts = [], keep = {}; let bad = false;
+  if (nameCh) {
+    try {
+      await fnAuth({ action: "set_name", user_id: u.user_id, display_name: disp }); parts.push(`השם עודכן ל־${disp}.`);
+      if (u.me) { if (PROFILE) PROFILE.display_name = disp; $("#hello").textContent = `שלום ${disp}`; $("#userName").textContent = disp; $("#menuName").textContent = disp }
+    } catch (e) { bad = true; keep.disp = disp; parts.push(`השם לא נשמר: ${errText(e)}`) }
+  }
+  if (mailCh) {
+    try { await fnAuth({ action: "set_contact_email", user_id: u.user_id, email: mail || null }); CARD.mail = mail; parts.push(mail ? `המייל של ${n} נשמר.` : `המייל של ${n} הוסר.`) }
+    catch (e) { bad = true; keep.mail = mi.value; parts.push(`המייל לא נשמר: ${detailsErr(e)}`) }
+  }
+  CTL = await fnAuth({ action: "list" }).catch(() => CTL);
+  if (CARD && userOf(CARD.id)) drawCard(keep);
+  cmsg(parts.join(" "), bad ? "err" : "ok");
+}
+// one tool's role at one operator, saved at once; "אין גישה" asks first
+async function setRole(u, mod, op, role) {
+  const n = u.username, tn = toolName(mod);
+  if (role === "none") {
+    if (!confirm(`להסיר את הגישה של ${n} ל${tn}?`)) { drawCard(); return }
+    return ctlDo({ ...(mod === "deadhead" ? { action: "remove_membership" } : { action: "remove_tool_role", module: mod }), user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${tn} הוסרה`);
+  }
+  return ctlDo({ ...(mod === "deadhead" ? { action: "set_membership" } : { action: "set_tool_role", module: mod }), user_id: u.user_id, operator_id: op, role }, `${n} · ${tn}: ${ROLEHE[role]}`);
+}
+// the operator row: no access yet -> only picks where grants go; one operator -> moves everything (after a confirm);
+// several operators -> only switches which one is shown and edited (spec §11)
+async function setCardOp(u, to) {
+  const orgs = orgsOf(u), from = orgs[0];
+  if (orgs.length !== 1 || to === from) { CARD.op = to; drawCard(); return }
+  if (!confirm(`להעביר את כל ההרשאות של ${u.username} מ־${opName(from)} ל־${opName(to)}?`)) { drawCard(); return }
+  CARD.op = to;
+  if (!(await ctlDo({ action: "move_operator", user_id: u.user_id, from, to }, `ההרשאות של ${u.username} עברו ל־${opName(to)}`))) { CARD.op = from; drawCard() }
+}
+async function cardClick(t) {
+  const u = userOf(CARD.id), n = u.username, box = $("#ucard [data-resetbox]");
+  if (t.closest("[data-ucback]")) return history.back();
+  if (t.id === "ucSave") return saveCard();
+  if (t.id === "ucReset") {
+    if (u.has_email) return resetByMail(u);
+    box.hidden = false;
+    box.innerHTML = `<label for="rpw-${esc(u.user_id)}">סיסמה זמנית ל־${esc(n)}</label><div class="copyrow"><input id="rpw-${esc(u.user_id)}" data-rpw dir="ltr" value="${suggestPw()}" autocomplete="off" aria-describedby="rpwc-${esc(u.user_id)}">
+      <button type="button" class="btn-blue small" data-rsave>קביעה</button><button type="button" class="link-btn" data-rcancel>ביטול</button></div>
+      <div class="msg pwchk" id="rpwc-${esc(u.user_id)}" data-rpwchk aria-live="polite"></div>`;
+    const i = box.querySelector("input"); pwShow(i, box.querySelector("[data-rpwchk]")); i.focus(); i.select(); return;
+  }
+  if (t.dataset.rcancel != null) { box.hidden = true; box.innerHTML = ""; $("#ucReset").focus(); return }
+  if (t.dataset.rsave != null) {
+    const i = box.querySelector("[data-rpw]"), pw = i.value;
+    if (weakPw(pw)) { pwShow(i, box.querySelector("[data-rpwchk]")); i.focus(); return }
+    if (await ctlDo({ action: "reset_password", user_id: u.user_id, password: pw }, "")) cmsg(`נקבעה סיסמה זמנית ל־${n}: ${pw} . העבר לו אותה. בכניסה הבאה הוא יבחר סיסמה חדשה.`, "ok");
+    return;
+  }
+  if (t.id === "ucMfa") { if (confirm(`לאפס את האימות הדו־שלבי של ${n}? (למשל טלפון שאבד). בכניסה הבאה הוא יכנס בסיסמה${u.platform || u.memberships.some(m => m.role === "admin") ? " ויחויב להפעיל אימות חדש" : " בלבד"}.`)) ctlDo({ action: "reset_mfa", user_id: u.user_id }, `האימות הדו־שלבי של ${n} אופס`); return }
+  if (t.id === "ucDis") { const off = !u.disabled; if (off && !confirm(`להשבית את ${n}? הוא לא יוכל להיכנס עד שיופעל שוב.`)) return; ctlDo({ action: "set_disabled", user_id: u.user_id, disabled: off }, off ? `${n} הושבת` : `${n} הופעל`); return }
+  if (t.id === "ucDel") {
+    if (!confirm(`למחוק את המשתמש ${n} לצמיתות? אי אפשר לבטל.`)) return;
+    CARD = null; history.replaceState({ cp: 1 }, "", "?panel=users");
+    ctlDo({ action: "delete", user_id: u.user_id }, `${n} נמחק`); return;
+  }
+}
+async function cardChange(t) {
+  const u = userOf(CARD.id);
+  if (t.dataset.ucrole != null) return setRole(u, t.dataset.mod, CARD.op, t.value);
+  if (t.id === "ucOp") return setCardOp(u, t.value);
+  if (t.id === "ucPlat") {
+    const on = t.checked, n = u.username;
+    if (!confirm(on ? `להפוך את ${n} למנהל מערכת? הוא יראה וינהל הכול, בכל המפעילים.` : `להסיר מ־${n} את הרשאת מנהל המערכת?`)) { t.checked = !on; return }
+    ctlDo({ action: "set_platform", user_id: u.user_id, on }, on ? `${n} הוא עכשיו מנהל מערכת` : `${n} כבר לא מנהל מערכת`);
+  }
 }
 $("#cpBody").addEventListener("input", e => {
   const t = e.target;
   if (t.id === "cpQ") { CQ = t.value; const pos = t.selectionStart; drawUsers(); const q = $("#cpQ"); q.focus(); q.setSelectionRange(pos, pos) }
   else if (t.dataset.rpw != null) pwShow(t, t.parentNode.parentNode.querySelector("[data-rpwchk]"));
-
 });
-$("#cpBody").addEventListener("click", async e => {
+$("#cpBody").addEventListener("click", e => {
   const t = e.target;
   if (t.id === "cpNew") return newOpen();
-  if (t.closest("[data-menu]")) { const b = t.closest("[data-menu]"); return CMENU && CMENU.btn === b ? closeRowMenu(true) : openRowMenu(b) }
-  const row = t.closest("[data-u]"); if (!row) return; const u = userOf(row.dataset.u), n = u.username;
-  const k = t.dataset.do; if (k) closeRowMenu();
-  if (k === "reset" && u.has_email) return resetByMail(u);
-  if (k === "reset") {
-    const b = row.querySelector("[data-resetbox]"); b.hidden = false;
-    b.innerHTML = `<label for="rpw-${esc(u.user_id)}">סיסמה זמנית ל־${esc(n)}</label><div class="copyrow"><input id="rpw-${esc(u.user_id)}" data-rpw dir="ltr" value="${suggestPw()}" autocomplete="off" aria-describedby="rpwc-${esc(u.user_id)}">
-      <button type="button" class="btn-blue small" data-rsave>קביעה</button><button type="button" class="link-btn" data-rcancel>ביטול</button></div>
-      <div class="msg pwchk" id="rpwc-${esc(u.user_id)}" data-rpwchk aria-live="polite"></div>`;
-    const i = b.querySelector("input"); pwShow(i, b.querySelector("[data-rpwchk]")); i.focus(); i.select(); return;
-  }
-  if (k === "name") {
-    const b = row.querySelector("[data-resetbox]"); b.hidden = false;
-    b.innerHTML = `<label for="rnm-${esc(u.user_id)}">שם תצוגה ל־${esc(n)}</label><div class="copyrow"><input id="rnm-${esc(u.user_id)}" data-rnm maxlength="80" value="${esc(u.display_name || "")}" autocomplete="off">
-      <button type="button" class="btn-blue small" data-nsave>שמירה</button><button type="button" class="link-btn" data-rcancel>ביטול</button></div>`;
-    const i = b.querySelector("input"); i.focus(); i.select(); return;
-  }
-  if (k === "mail") return openMailBox(row, u);
-  if (t.dataset.msave != null || t.dataset.mdel != null) return saveMail(row, u, t.dataset.mdel != null);
-  if (t.dataset.nsave != null) return saveName(row, u);
-  if (t.dataset.rcancel != null) { const b = row.querySelector("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; row.querySelector("[data-menu]")?.focus(); return }
-  if (t.dataset.rsave != null) {
-    const i = row.querySelector("[data-rpw]"), pw = i.value;
-    if (weakPw(pw)) { pwShow(i, row.querySelector("[data-rpwchk]")); i.focus(); return }
-    if (await ctlDo({ action: "reset_password", user_id: u.user_id, password: pw }, "")) cmsg(`נקבעה סיסמה זמנית ל־${n}: ${pw} . העבר לו אותה. בכניסה הבאה הוא יבחר סיסמה חדשה.`, "ok");
-    return;
-  }
-  if (k === "mfar") { if (confirm(`לאפס את האימות הדו־שלבי של ${n}? (למשל טלפון שאבד). בכניסה הבאה הוא יכנס בסיסמה${u.platform || u.memberships.some(m => m.role === "admin") ? " ויחויב להפעיל אימות חדש" : " בלבד"}.`)) ctlDo({ action: "reset_mfa", user_id: u.user_id }, `האימות הדו־שלבי של ${n} אופס`); return }
-  if (k === "plat") { const on = !u.platform; if (confirm(on ? `להפוך את ${n} למנהל מערכת? הוא יראה וינהל הכול, בכל המפעילים.` : `להסיר מ־${n} את הרשאת מנהל המערכת?`)) ctlDo({ action: "set_platform", user_id: u.user_id, on }, on ? `${n} הוא עכשיו מנהל מערכת` : `${n} כבר לא מנהל מערכת`); return }
-  if (k === "dis") { const off = !u.disabled; if (off && !confirm(`להשבית את ${n}? הוא לא יוכל להיכנס עד שיופעל שוב.`)) return; ctlDo({ action: "set_disabled", user_id: u.user_id, disabled: off }, off ? `${n} הושבת` : `${n} הופעל`); return }
-  if (k === "del") { if (confirm(`למחוק את המשתמש ${n} לצמיתות? אי אפשר לבטל.`)) ctlDo({ action: "delete", user_id: u.user_id }, `${n} נמחק`); return }
+  const ed = t.closest("[data-edit]"); if (ed) return openCard(ed.closest("[data-u]").dataset.u);
+  if (CARD && t.closest("#ucard")) return cardClick(t);
 });
-document.addEventListener("click", e => { if (CMENU && !e.target.closest(".rowmenu,[data-menu]")) closeRowMenu() });
-async function openMailBox(row, u) {
-  const b = row.querySelector("[data-resetbox]"); b.hidden = false; b.innerHTML = '<p class="muted small">טוען…</p>';
-  let em = "";
-  try { em = (await fnAuth({ action: "get_contact_email", user_id: u.user_id })).email || "" } catch (e) { b.innerHTML = ""; b.hidden = true; cmsg(errText(e), "err"); return }
-  const id = "mem-" + esc(u.user_id);
-  b.innerHTML = `<label for="${id}">מייל של ${esc(u.username)}</label><div class="copyrow"><input id="${id}" data-memail type="email" dir="ltr" maxlength="254" value="${esc(em)}" autocomplete="off" data-saved="${esc(em)}">
-      <button type="button" class="btn-blue small" data-msave>שמירת המייל</button>${em ? '<button type="button" class="btn-line small danger" data-mdel>הסרה</button>' : ""}<button type="button" class="link-btn" data-rcancel>ביטול</button></div>
-    <p class="muted small">הזן כתובת רק אחרי שהעובד הסכים לקבל מייל ממערכת יאללה־סע. השמירה לא שולחת מייל: סיסמה חדשה נשלחת מ"איפוס סיסמה".</p>`;
-  b.querySelector("input").focus();
-}
-async function saveMail(row, u, remove) {
-  const i = row.querySelector("[data-memail]"), v = remove ? null : i.value.trim().toLowerCase();
-  if (!remove && !i.checkValidity()) { cmsg(DETAILS_MSG.bad_email, "err"); i.focus(); return }
-  try { await fnAuth({ action: "set_contact_email", user_id: u.user_id, email: v || null }) }
-  catch (e) { cmsg(detailsErr(e), "err"); return }
-  CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
-  cmsg(v ? `המייל של ${u.username} נשמר` : `המייל של ${u.username} הוסר`, "ok");
-}
+$("#cpBody").addEventListener("change", e => { if (CARD && e.target.closest("#ucard")) cardChange(e.target) });
+$("#cpBody").addEventListener("keydown", e => {
+  if (e.key === "Enter" && CARD && (e.target.id === "ucDisp" || e.target.id === "ucMail")) { e.preventDefault(); saveCard() }
+});
 // "איפוס סיסמה" for a user with a saved email: the address is read from the server (the one the mail really goes to)
 async function resetByMail(u) {
   let em = "";
@@ -297,73 +430,13 @@ async function sendDetailsTo(u, email) {
   cmsg("שולח…");
   try {
     await fnAuth({ action: "send_details", user_id: u.user_id });
-    CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
+    CTL = await fnAuth({ action: "list" }).catch(() => CTL); cpDraw();
     cmsg(`פרטי הכניסה נשלחו ל־${email}. הסיסמה הזמנית בתוקף 7 ימים.`, "ok");
   } catch (e) { cmsg(detailsErr(e), "err") }
 }
 $("#cpMsg").addEventListener("click", e => {
   const b = e.target.closest("[data-sendnew]"); if (!b) return;
   sendDetailsTo({ user_id: b.dataset.sendnew, username: b.dataset.uname, display_name: b.dataset.dname }, b.dataset.email);
-});
-async function saveName(row, u) {
-  const i = row.querySelector("[data-rnm]"), v = i.value.trim();
-  if (!v) { cmsg("צריך לכתוב שם", "err"); i.focus(); return }
-  if (v === (u.display_name || "")) { const b = row.querySelector("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; return }
-  if (await ctlDo({ action: "set_name", user_id: u.user_id, display_name: v }, `השם של ${u.username} עודכן ל־${v}`) && u.me) {
-    if (PROFILE) PROFILE.display_name = v;
-    $("#hello").textContent = `שלום ${v}`; $("#userName").textContent = v; $("#menuName").textContent = v;
-  }
-}
-$("#cpBody").addEventListener("keydown", e => {
-  if (e.key === "Enter" && e.target.dataset.rnm != null) { e.preventDefault(); const row = e.target.closest("[data-u]"); return saveName(row, userOf(row.dataset.u)) }
-  if (e.key === "Escape" && e.target.dataset.rnm != null) { e.stopPropagation(); const b = e.target.closest("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; return }
-  if (!CMENU || !e.target.closest(".rowmenu")) return;
-  const items = [...CMENU.el.querySelectorAll("button")], i = items.indexOf(document.activeElement);
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus() }
-  if (e.key === "Tab") closeRowMenu();
-});
-
-// ---------- permissions per tool ----------
-function drawMatrix() {
-  const AO = adminOps(), tools = (TILES || []).filter(t => t.module);
-  if (CFILTER && !AO.some(o => o.id === CFILTER)) CFILTER = "";
-  const opF = CFILTER ? OPS.find(o => o.id === CFILTER) : null;
-  // the organization a cell edits: the filter if chosen; else the user's only organization; else (no access yet) the
-  // caller's only administered organization. A user in several organizations (none today) needs the filter to edit.
-  const editOp = u => opF ? opF.id : orgsOf(u).length === 1 ? orgsOf(u)[0] : !orgsOf(u).length && AO.length === 1 ? AO[0].id : "";
-  const chips = ms => [...new Set(ms.map(m => m.role))].map(r => `<span class="chip">${esc(ROLEHE[r] || r)}</span>`).join("") || '<span class="muted">—</span>';
-  const cell = (u, t) => {
-    if (t.status !== "live") return '<span class="muted" title="הכלי עוד לא פעיל">—</span>';
-    if (u.platform) return '<span class="chip chip-plat">מנהל מערכת</span>';
-    const op = editOp(u), ms = grantsOf(u, t.module).filter(m => !opF || m.operator_id === opF.id);
-    if (u.manageable && !op) return `<span title="משויך לכמה ארגונים: כדי לשנות, בחר ארגון בתיבת המפעיל">${chips(ms)}</span>`;
-    if (!u.manageable || !AO.some(o => o.id === op)) return chips(ms);
-    const cur = (ms.find(m => m.operator_id === op) || {}).role || "";
-    const canAdmin = PLATFORM || cur === "admin";
-    return `<select class="rsel" data-rset="${esc(u.user_id)}" data-mod="${esc(t.module)}" data-op="${esc(op)}" aria-label="הרשאה של ${esc(u.username)} ב${esc(t.title)}">
-        <option value="">אין גישה</option>${ROLES.filter(r => r !== "admin" || canAdmin).map(r => `<option value="${r}"${r === cur ? " selected" : ""}>${ROLEHE[r]}</option>`).join("")}</select>`;
-  };
-  // the operator box only filters the rows (users who belong to that organization)
-  const rowsM = (CTL.users || []).filter(u => !opF || u.platform || orgsOf(u).includes(opF.id));
-  $("#cpBody").innerHTML = `<div class="cp-tools">
-      <label class="pill-sel"><span>מפעיל:</span><select id="cpOp">${PLATFORM || AO.length > 1 ? `<option value="">כל המפעילים</option>` : ""}${AO.map(o => `<option value="${esc(o.id)}"${o.id === CFILTER ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>
-      <span class="muted small">בחר הרשאה בכל משבצת. השינוי נשמר מיד.</span></div>
-    <div class="mx-wrap"><table class="mx"><thead><tr><th scope="col">שם</th>${tools.map(t => `<th scope="col">${esc(t.title)}${t.status !== "live" ? '<span class="soon">בקרוב</span>' : ""}</th>`).join("")}</tr></thead>
-      <tbody>${rowsM.map(u => `<tr><th scope="row">${esc(u.display_name || u.username)}<span dir="ltr" class="muted small">${esc(u.username)}</span></th>${tools.map(t => `<td>${cell(u, t)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
-    <p class="hint">צופה: רואה הכול. עורך: גם משנה הגדרות, תגבורים ומעברי לילה. מנהל: גם רואה את המשתמשים של המפעיל. מנהל מערכת: הכול, בכל המפעילים.${PLATFORM ? "" : " שינויים במשתמשים נעשים על ידי מנהל המערכת."}</p>`;
-}
-$("#cpBody").addEventListener("change", e => {
-  const t = e.target;
-  if (t.id === "cpOp") { CFILTER = t.value; drawMatrix(); $("#cpOp").focus(); return }
-  if (t.dataset.rset) {
-    const u = userOf(t.dataset.rset), op = t.dataset.op, n = u.username, mod = t.dataset.mod || "deadhead", tn = toolName(mod);
-    // each tool keeps its own role: deadhead in memberships, other tools in tool_roles
-    const rm = mod === "deadhead" ? { action: "remove_membership" } : { action: "remove_tool_role", module: mod };
-    const set = mod === "deadhead" ? { action: "set_membership" } : { action: "set_tool_role", module: mod };
-    if (!op) return;
-    if (!t.value) { if (confirm(`להסיר את הגישה של ${n} ל${tn}?`)) ctlDo({ ...rm, user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${tn} הוסרה`); else drawMatrix(); return }
-    ctlDo({ ...set, user_id: u.user_id, operator_id: op, role: t.value }, `${n} · ${tn}: ${ROLEHE[t.value]}`);
-  }
 });
 
 // ---------- new user ----------
@@ -396,7 +469,7 @@ $("#newForm").addEventListener("submit", async e => {
   const dh = (picks.find(x => x.module === "deadhead") || { role: "none" }).role, tools = picks.filter(x => x.module !== "deadhead" && x.role !== "none");
   const role = op === "platform" ? "platform" : dh, email = $("#nEmail").value.trim().toLowerCase();
   const noAccess = op !== "platform" && dh === "none" && !tools.length
-    ? ` שים לב: למשתמש ${user} אין גישה לאף כלי. אפשר לקבוע בלשונית "הרשאות לפי כלי".` : "";
+    ? ` שים לב: למשתמש ${user} אין גישה לאף כלי. אפשר לקבוע בכרטיס שלו (העיפרון בשורה שלו).` : "";
   if (email && !mailOk()) { m.className = "msg err"; m.textContent = DETAILS_MSG.bad_email; $("#nEmail").focus(); return }
   if (!email && weakPw(pw)) { pwShow($("#nPw"), $("#nPwChk")); m.className = "msg err"; m.textContent = ERR.weak_password; $("#nPw").focus(); return }
   m.className = "msg"; m.textContent = "יוצר…"; $("#nSave").disabled = true;
@@ -413,7 +486,7 @@ $("#newForm").addEventListener("submit", async e => {
       CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
       cmsg(`נוצר המשתמש ${user} ונשלח אליו מייל עם פרטי הכניסה ל־${email}.${noAccess}`, "ok");
     } catch (se) {
-      cmsg(`נוצר המשתמש ${user}, אבל המייל לא נשלח: ${detailsErr(se)} אפשר לשלוח שוב מתפריט ⋯ ← מייל ושליחת פרטים.`, "err");
+      cmsg(`נוצר המשתמש ${user}, אבל המייל לא נשלח: ${detailsErr(se)} אפשר לשלוח שוב מהכרטיס שלו: "איפוס סיסמה".`, "err");
     }
   } catch (err) { m.className = "msg err"; m.textContent = errText(err) } finally { $("#nSave").disabled = false }
 });
