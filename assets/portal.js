@@ -107,24 +107,29 @@ async function mfaVerify(fid, code) {
 }
 
 // ---------- access ----------
-let ME = null, PROFILE = null, PLATFORM = false, OPS = [], MS = [], OP = null, MFAF = null, TILES = null;
+let ME = null, PROFILE = null, PLATFORM = false, OPS = [], MS = [], TR = null, OP = null, MFAF = null, TILES = null;
 const ROLEHE = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
 async function loadAccess() {
   ME = SES.user && SES.user.id ? SES.user : await authReq("GET", "user");
   if (!SES.user) { SES.user = ME; lsSet(SKEY, JSON.stringify(SES)) }
-  const [pr, pa, ms, ops] = await Promise.all([
+  const [pr, pa, ms, ops, tr] = await Promise.all([
     getRows("profiles", "select=username,display_name,must_change_password,disabled&user_id=eq." + encodeURIComponent(ME.id)),
     getRows("platform_admins", "select=user_id&user_id=eq." + encodeURIComponent(ME.id)),
     getRows("memberships", "select=operator_id,role&user_id=eq." + encodeURIComponent(ME.id)),
-    getRows("operators", "select=id,slug,name,logo_url&order=name")]);
-  PROFILE = pr[0] || null; PLATFORM = pa.length > 0; MS = ms || [];
-  OPS = (ops || []).filter(o => PLATFORM || MS.some(m => m.operator_id === o.id));
+    getRows("operators", "select=id,slug,name,logo_url&order=name"),
+    // role per tool (2026-11-19). null = table not there yet (migration not applied): tools fall back to the deadhead role
+    getRows("tool_roles", "select=operator_id,module,role&user_id=eq." + encodeURIComponent(ME.id)).catch(() => null)]);
+  PROFILE = pr[0] || null; PLATFORM = pa.length > 0; MS = ms || []; TR = tr;
+  OPS = (ops || []).filter(o => PLATFORM || MS.some(m => m.operator_id === o.id) || (TR || []).some(m => m.operator_id === o.id));
   // a platform admin is not a member of an operator: the default view is "all operators" (OP = null); picking an
   // operator in the switcher only narrows the view. A member starts at his last (or first) operator.
   const urlOp = new URLSearchParams(location.search).get("op");
   OP = PLATFORM ? (OPS.find(o => o.slug === urlOp) || null) : (OPS.find(o => o.slug === (urlOp || lsGet("ys_op"))) || OPS[0] || null);
 }
-const roleAt = op => PLATFORM ? "admin" : op ? (MS.find(m => m.operator_id === op.id)?.role || null) : null;
+// memberships.role = the deadhead tool's role; every other tool has its own role in tool_roles (separate per tool)
+const roleAt = (op, module = "deadhead") => PLATFORM ? "admin" : !op ? null
+  : module === "deadhead" || !TR ? (MS.find(m => m.operator_id === op.id)?.role || null)
+  : (TR.find(m => m.operator_id === op.id && m.module === module)?.role || null);
 
 // ---------- gate ----------
 let GMODE = "login";
@@ -264,10 +269,10 @@ async function loadTiles() {
   const r = await fetch("tiles.json", { cache: "no-cache" }); if (!r.ok) throw new Error("tiles " + r.status);
   return TILES = await r.json();
 }
-// Until the identity migration (docs/identity-migration.sql) is approved: a live tile needs a membership at the chosen
-// operator with role >= min_role (platform admins see all). "soon" tiles show to everyone, not clickable.
+// A live tile needs, at the chosen operator, a role in that tool (deadhead: memberships; others: tool_roles)
+// with role >= min_role (platform admins see all). "soon" tiles show to everyone, not clickable.
 const RANK = { viewer: 1, editor: 2, admin: 3 };
-const canOpen = t => { const r = roleAt(OP); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
+const canOpen = t => { const r = roleAt(OP, t.module); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
 // ?op= only for tools on this site; another domain (app.yalla-sa.app) has its own sign-in and operator choice
 function tileUrl(t) { const u = new URL(t.url, location.href); if (OP && u.origin === location.origin) u.searchParams.set("op", OP.slug); return u.href }
 const ALLOPS = "כל המפעילים";
@@ -292,7 +297,7 @@ function drawOperator() {
   const lg = $("#opLogo"), src = OP && OP.logo_url && /^assets\/operators\/[a-z0-9-]+\.(png|svg|webp)$/.test(OP.logo_url) ? OP.logo_url : "";
   lg.hidden = !src; if (src) { lg.src = src; lg.alt = "" }
   if (OP && !PLATFORM) lsSet("ys_op", OP.slug);
-  const r = roleAt(OP); $("#menuRole").textContent = PLATFORM ? "מנהל מערכת" : r ? `${ROLEHE[r]} · ${OP.name}` : "";
+  const r = roleAt(OP) || (OP && (TR || []).find(m => m.operator_id === OP.id)?.role); $("#menuRole").textContent = PLATFORM ? "מנהל מערכת" : r ? `${ROLEHE[r]} · ${OP.name}` : "";
 }
 $("#opLogo").addEventListener("error", e => { e.target.hidden = true });
 $("#opSel").addEventListener("change", e => {

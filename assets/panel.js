@@ -2,8 +2,9 @@
 // Tabs: users, permissions per tool, my security. Every write goes through the manage_users Edge Function, which
 // checks the caller again (platform admin: everyone; operator admin: viewers/editors of his operators; MFA aal2).
 // RLS in the database stays the real enforcement: this screen only shows and asks.
-// Per tool: today only the deadhead tool is live, and its role per operator is the membership (memberships.role).
-// Tools marked "soon" get their own column of roles with the identity migration (docs/identity-migration.sql).
+// Per tool, a separate role per operator (bug fixed 2026-11-19: one shared role changed both tools):
+//   deadhead -> memberships.role (set_membership / remove_membership); every other live tool -> tool_roles
+//   (set_tool_role / remove_tool_role, list returns them as u.tools). "soon" tools show "—".
 "use strict";
 Object.assign(ERR, {
   "row-level security": "אין לך הרשאה לשנות את זה", not_allowed: "אין לך הרשאה לפעולה הזו", "42501": "אין לך הרשאה לשנות את זה",
@@ -130,16 +131,23 @@ async function cpDraw(reload = false) {
 }
 
 // ---------- users ----------
-const dt = x => x ? new Date(x).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" }) : "";
+// last sign-in: date and time, Israel time, for every user (also disabled / two-step users)
+const dtm = x => { const d = x ? new Date(x) : null; return d && !isNaN(d) ? d.toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "" };
+const lastSeen = u => u.last_sign_in && dtm(u.last_sign_in)
+  ? `<time datetime="${esc(u.last_sign_in)}" dir="ltr">${esc(dtm(u.last_sign_in))}</time>` : '<span class="muted">עוד לא נכנס</span>';
 function statusOf(u) {
   if (u.disabled) return `<span class="st-off">${LOCK}מושבת</span>`;
   if (u.must_change) return '<span class="muted">צריך להחליף סיסמה</span>';
   if (u.mfa) return `<span class="st-mfa">${LOCK}אימות דו־שלבי</span>`;
-  return u.last_sign_in ? `<span class="muted">נכנס לאחרונה ${dt(u.last_sign_in)}</span>` : '<span class="muted">עוד לא נכנס</span>';
+  return '<span class="muted">פעיל</span>';
 }
+// grants of one tool: deadhead = memberships, any other tool = its own rows in u.tools
+const grantsOf = (u, mod) => mod === "deadhead" ? u.memberships : (u.tools || []).filter(m => m.module === mod);
+const toolName = mod => ((TILES || []).find(t => t.module === mod) || {}).title || mod;
 function accessOf(u) {
   if (u.platform) return '<span class="chip chip-plat">מנהל מערכת</span>';
-  const c = u.memberships.map(m => `<span class="chip">${esc(opName(m.operator_id))} · ${esc(ROLEHE[m.role] || m.role)}</span>`).join("");
+  const all = [...u.memberships.map(m => ({ ...m, module: "deadhead" })), ...(u.tools || [])];
+  const c = all.map(m => `<span class="chip">${esc(toolName(m.module))} · ${esc(opName(m.operator_id))} · ${esc(ROLEHE[m.role] || m.role)}</span>`).join("");
   return (c || '<span class="muted">אין גישה</span>') + (u.other_access ? '<span class="muted small">+ מפעילים אחרים</span>' : "");
 }
 const shown = () => (CTL.users || []).filter(u => !CQ || (u.username + " " + (u.display_name || "")).toLowerCase().includes(CQ.toLowerCase()));
@@ -150,11 +158,12 @@ function drawUsers() {
         <input id="cpQ" type="search" placeholder="חיפוש משתמש" value="${esc(CQ)}" autocomplete="off"></label>
       <button type="button" class="btn-blue" id="cpNew">+ משתמש חדש</button></div>
     <div class="cp-table" role="table" aria-label="משתמשים">
-      <div class="cp-tr cp-th" role="row"><span role="columnheader">שם</span><span role="columnheader">גישה</span><span role="columnheader">מצב</span><span role="columnheader"><span class="sr">פעולות</span></span></div>
+      <div class="cp-tr cp-th" role="row"><span role="columnheader">שם</span><span role="columnheader">גישה</span><span role="columnheader">מצב</span><span role="columnheader">כניסה אחרונה</span><span role="columnheader"><span class="sr">פעולות</span></span></div>
       ${rows.map(u => `<div class="cp-tr" role="row" data-u="${esc(u.user_id)}">
         <span role="cell" class="cp-name"><b>${esc(u.display_name || u.username)}${u.me ? ' <span class="muted small">(אתה)</span>' : ""}</b><span dir="ltr">${esc(u.username)}</span></span>
         <span role="cell" class="cp-acc">${accessOf(u)}</span>
         <span role="cell" class="cp-st">${statusOf(u)}</span>
+        <span role="cell" class="cp-last"><span class="cp-lbl">כניסה אחרונה: </span>${lastSeen(u)}</span>
         <span role="cell" class="cp-act">${u.manageable || u.me ? `<button type="button" class="dots" data-menu aria-haspopup="true" aria-expanded="false" aria-label="פעולות על ${esc(u.username)}">⋯</button>` : ""}</span>
         <div class="cp-reset" data-resetbox hidden></div></div>`).join("") || '<p class="cp-empty">אין משתמשים שמתאימים לחיפוש</p>'}
     </div>
@@ -242,12 +251,12 @@ function drawMatrix() {
   const cell = (u, t) => {
     if (t.status !== "live") return '<span class="muted" title="הכלי עוד לא פעיל">—</span>';
     if (u.platform) return '<span class="chip chip-plat">מנהל מערכת</span><span class="opl">כל המפעילים</span>';
-    const ms = u.memberships.filter(m => !opF || m.operator_id === opF.id);
+    const ms = grantsOf(u, t.module).filter(m => !opF || m.operator_id === opF.id);
     if (!opF) return ms.map(m => `<span class="chip">${esc(ROLEHE[m.role])}</span><span class="opl">${esc(opName(m.operator_id))}</span>`).join("") || '<span class="muted">—</span>';
     const cur = ms[0]?.role || "";
     const canAdmin = PLATFORM || cur === "admin";
     if (!u.manageable) return cur ? `<span class="chip">${esc(ROLEHE[cur])}</span><span class="opl">${esc(opF.name)}</span>` : '<span class="muted">—</span>';
-    return `<select class="rsel" data-rset="${esc(u.user_id)}" aria-label="הרשאה של ${esc(u.username)} ב${esc(t.title)}, ${esc(opF.name)}">
+    return `<select class="rsel" data-rset="${esc(u.user_id)}" data-mod="${esc(t.module)}" aria-label="הרשאה של ${esc(u.username)} ב${esc(t.title)}, ${esc(opF.name)}">
         <option value="">אין גישה</option>${ROLES.filter(r => r !== "admin" || canAdmin).map(r => `<option value="${r}"${r === cur ? " selected" : ""}>${ROLEHE[r]}</option>`).join("")}</select>
       <span class="opl">${esc(opF.name)}</span>`;
   };
@@ -263,9 +272,12 @@ $("#cpBody").addEventListener("change", e => {
   const t = e.target;
   if (t.id === "cpOp") { CFILTER = t.value; drawMatrix(); $("#cpOp").focus(); return }
   if (t.dataset.rset) {
-    const u = userOf(t.dataset.rset), op = CFILTER, n = u.username;
-    if (!t.value) { if (confirm(`להסיר את הגישה של ${n} ל${opName(op)}?`)) ctlDo({ action: "remove_membership", user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${opName(op)} הוסרה`); else drawMatrix(); return }
-    ctlDo({ action: "set_membership", user_id: u.user_id, operator_id: op, role: t.value }, `${n} · ${opName(op)}: ${ROLEHE[t.value]}`);
+    const u = userOf(t.dataset.rset), op = CFILTER, n = u.username, mod = t.dataset.mod || "deadhead", tn = toolName(mod);
+    // each tool keeps its own role: deadhead in memberships, other tools in tool_roles
+    const rm = mod === "deadhead" ? { action: "remove_membership" } : { action: "remove_tool_role", module: mod };
+    const set = mod === "deadhead" ? { action: "set_membership" } : { action: "set_tool_role", module: mod };
+    if (!t.value) { if (confirm(`להסיר את הגישה של ${n} ל${tn} ב${opName(op)}?`)) ctlDo({ ...rm, user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${tn} ב${opName(op)} הוסרה`); else drawMatrix(); return }
+    ctlDo({ ...set, user_id: u.user_id, operator_id: op, role: t.value }, `${n} · ${tn} · ${opName(op)}: ${ROLEHE[t.value]}`);
   }
 });
 
