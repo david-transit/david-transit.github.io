@@ -621,16 +621,22 @@ function stRow(i) {
       ${i.grp === "manual" ? '<button type="button" class="btn-line small st-mark">בדקתי עכשיו</button>' : ""}</div>
   </div>`;
 }
+// the session may drop to aal1 while the tab is open (e.g. another tab signed in): go back through cpDraw, which asks for the code
+const stForbidden = e => e && (e.status === 403 || /forbidden|42501/.test(e.message || ""));
+let ST_LOAD = 0; // a newer load (or another tab) makes an older response stale
 async function drawStatus() {
-  const box = $("#cpBody");
+  if (CTAB !== "status") return;
+  if (aal() !== "aal2") return cpDraw();
+  const box = $("#cpBody"), my = ++ST_LOAD, live = () => my === ST_LOAD && CTAB === "status";
   box.innerHTML = '<p class="cp-empty">טוען…</p>';
   let S;
   try { S = await stRpc("platform_status") }
   catch (e) {
-    if (e.status === 403 || /forbidden/.test(e.message)) { box.innerHTML = '<p class="cp-empty">רק מנהל מערכת עם קוד אימות רואה את מצב הפלטפורמה.</p>'; return }
+    if (!live()) return;
+    if (stForbidden(e)) { if (aal() !== "aal2") return cpDraw(); box.innerHTML = '<p class="cp-empty">רק מנהל מערכת עם קוד אימות רואה את מצב הפלטפורמה.</p>'; return }
     box.innerHTML = `<div class="cp-empty"><p class="msg err">לא ניתן לטעון את מצב הפלטפורמה</p><button type="button" class="btn-line small st-retry">נסה שוב</button></div>`; return;
   }
-  if (CTAB !== "status") return;
+  if (!live()) return;
   const items = S.items || [];
   if (!items.length) { box.innerHTML = '<p class="cp-empty">עוד לא נבדק. הבדיקה הראשונה תרוץ בשעה הקרובה.</p>'; return }
   const attn = items.filter(i => i.level === "bad" || i.level === "warn"), red = attn.some(i => i.level === "bad");
@@ -649,12 +655,19 @@ $("#cpBody").addEventListener("click", async e => {
   if (e.target.closest(".st-retry")) return drawStatus();
   const now = e.target.closest(".st-now"), mark = e.target.closest(".st-mark");
   if (!now && !mark) return;
+  if (aal() !== "aal2") return cpDraw();
   const b = now || mark; b.disabled = true;
   try {
     if (now) {
       if (await stRpc("platform_status_refresh") === "too_soon") { cmsg("אפשר לבדוק שוב בעוד דקה–שתיים"); b.disabled = false; return }
-      cmsg("הבדיקה רצה…"); await new Promise(r => setTimeout(r, 8000)); cmsg(""); return drawStatus();
+      cmsg("הבדיקה רצה…"); await new Promise(r => setTimeout(r, 8000));
+      if (CTAB !== "status") return; // the user moved to another tab meanwhile: leave it alone
+      cmsg(""); return drawStatus();
     }
     await stRpc("platform_status_mark", { p_key: mark.closest(".st-row").dataset.key }); return drawStatus();
-  } catch (err) { cmsg(errText(err), "err"); b.disabled = false }
+  } catch (err) {
+    b.disabled = false;
+    if (stForbidden(err)) return cpDraw();
+    cmsg(errText(err), "err");
+  }
 });
