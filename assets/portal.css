@@ -276,3 +276,7 @@ body.cp-open{overflow:auto}
 .dev-meta{color:var(--ys-muted);font-size:14px}
 .sec h4{margin:16px 0 4px}
 .dev-main .chip{align-self:flex-start}
+
+.gate-contact{text-align:center;margin:14px auto 0;color:var(--ys-muted);font-size:14px}
+.gate-contact a{color:var(--ys-primary)}
+.gate{flex-direction:column}
