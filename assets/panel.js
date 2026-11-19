@@ -646,7 +646,7 @@ async function drawStatus() {
       <div><b>${head}</b><span class="muted small">נבדק לאחרונה ${esc(hm(S.checked_at))} · נבדק כל שעה</span></div>
       <button type="button" class="btn-line small st-now">בדיקה עכשיו</button></div>
     ${ST_GRP.map(([g, t]) => { const rows = items.filter(i => i.grp === g); return rows.length ? `<section class="st-grp"><h3>${t}</h3><div class="st-card">${rows.map(stRow).join("")}</div></section>` : "" }).join("")}
-    <p class="st-foot muted small">התראות: אדום – ${esc(ST_CH[S.alert_channel] || S.alert_channel)} מיד · צהוב – סיכום ב־08:00</p>`;
+    <p class="st-foot muted small">${S.alert_channel === "off" ? "התראות כבויות: לא הוגדרו כתובות מייל" : `התראות במייל${S.alert_count ? ` ל־${esc(S.alert_count)} כתובות` : ""}: אדום – מיד · צהוב – סיכום ב־08:00`}</p>`;
   // bar widths through the CSSOM: the site's CSP (style-src 'self') blocks inline style attributes
   for (const f of box.querySelectorAll(".st-bar [data-pct]")) f.style.width = f.dataset.pct + "%";
 }
