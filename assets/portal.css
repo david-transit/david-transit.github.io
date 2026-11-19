@@ -195,6 +195,8 @@ body.cp-open{overflow:hidden}
 .rowmenu{position:absolute;left:0;top:38px;z-index:5;min-width:200px;background:#fff;border:1px solid var(--ys-line);border-radius:8px;box-shadow:0 10px 30px rgba(29,35,48,.14);padding:6px;display:flex;flex-direction:column}
 .rowmenu button{text-align:right;background:none;border:0;padding:9px 10px;border-radius:6px;cursor:pointer}
 .rowmenu button:hover,.rowmenu button:focus-visible{background:var(--ys-bg)}
+.cp-mail{margin-inline-start:6px;color:var(--ys-blue,#0b6bcb);font-size:13px}
+.cp-reset [data-msend]{margin-top:8px}
 .cp-reset{grid-column:1/-1;background:var(--ys-bg);border-radius:8px;padding:10px 12px}
 .cp-reset label{display:block;font-weight:700;margin-bottom:6px}
 .copyrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}

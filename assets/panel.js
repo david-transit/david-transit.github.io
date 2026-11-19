@@ -65,6 +65,17 @@ const adminOps = () => OPS.filter(o => PLATFORM || MS.some(m => m.operator_id ==
 const opName = id => (OPS.find(o => o.id === id) || {}).name || "מפעיל אחר";
 const isAdminAny = () => PLATFORM || MS.some(m => m.role === "admin");
 const ROLES = ["viewer", "editor", "admin"];
+// contact email + "send details" (welcome-mail spec 2026-11-19 §1): platform admin only; an operator admin only views
+const DETAILS_MSG = {
+  quota: "המכסה היומית של המיילים נגמרה. הסיסמה לא הוחלפה. נסה שוב מחר.",
+  send_failed_locked: "השליחה נכשלה והסיסמה הוחלפה. לחץ שוב על שליחת פרטים או קבע סיסמה זמנית.",
+  send_failed: "השליחה נכשלה. הסיסמה לא הוחלפה. נסה שוב בעוד כמה דקות.",
+  busy: "שליחה כבר מתבצעת. נסה שוב בעוד דקה.",
+  no_email: "אין כתובת מייל שמורה למשתמש.",
+  disabled: "המשתמש מושבת. הפעל אותו לפני שליחת פרטים.",
+  bad_email: "כתובת המייל לא תקינה.",
+};
+const detailsErr = e => { const m = String(e && e.message || e); for (const k in DETAILS_MSG) if (m.includes(k)) return DETAILS_MSG[k]; return errText(e) };
 const LOCK = '<svg class="lk" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>';
 
 let CTL = null, CTAB = "users", CFILTER = "", CQ = "", CMENU = null;
@@ -173,11 +184,12 @@ function drawUsers() {
   $("#cpBody").innerHTML = `<div class="cp-tools">
       <label class="cp-search"><span class="sr">חיפוש משתמש</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5"/></svg>
         <input id="cpQ" type="search" placeholder="חיפוש משתמש" value="${esc(CQ)}" autocomplete="off"></label>
-      <button type="button" class="btn-blue" id="cpNew">+ משתמש חדש</button></div>
+      ${PLATFORM ? '<button type="button" class="btn-blue" id="cpNew">+ משתמש חדש</button>' : ""}</div>
+    ${PLATFORM ? "" : '<p class="hint">שינויים במשתמשים נעשים על ידי מנהל המערכת.</p>'}
     <div class="cp-table" role="table" aria-label="משתמשים">
       <div class="cp-tr cp-th" role="row"><span role="columnheader">שם</span><span role="columnheader">שיוך ארגוני</span><span role="columnheader">גישה</span><span role="columnheader">מצב</span><span role="columnheader">כניסה אחרונה</span><span role="columnheader"><span class="sr">פעולות</span></span></div>
       ${rows.map(u => `<div class="cp-tr" role="row" data-u="${esc(u.user_id)}">
-        <span role="cell" class="cp-name"><b>${esc(u.display_name || u.username)}${u.me ? ' <span class="muted small">(אתה)</span>' : ""}</b><span dir="ltr">${esc(u.username)}</span></span>
+        <span role="cell" class="cp-name"><b>${esc(u.display_name || u.username)}${u.me ? ' <span class="muted small">(אתה)</span>' : ""}</b><span dir="ltr">${esc(u.username)}</span>${u.has_email ? '<span class="cp-mail" title="יש כתובת מייל" aria-label="יש כתובת מייל">✉</span>' : ""}</span>
         <span role="cell" class="cp-org"><span class="cp-lbl">שיוך ארגוני: </span>${orgOf(u)}</span>
         <span role="cell" class="cp-acc">${accessOf(u)}</span>
         <span role="cell" class="cp-st">${statusOf(u)}</span>
@@ -193,7 +205,7 @@ function closeRowMenu(focusBack) {
 }
 function openRowMenu(btn) {
   closeRowMenu(); const u = userOf(btn.closest("[data-u]").dataset.u);
-  const items = u.manageable ? [["name", "עריכת שם"], ["reset", "סיסמה זמנית"], u.mfa ? ["mfar", "איפוס אימות דו־שלבי"] : null,
+  const items = u.manageable ? [["name", "עריכת שם"], ["reset", "סיסמה זמנית"], PLATFORM ? ["mail", "מייל ושליחת פרטים"] : null, u.mfa ? ["mfar", "איפוס אימות דו־שלבי"] : null,
     PLATFORM ? ["plat", u.platform ? "הסרת מנהל מערכת" : "הפיכה למנהל מערכת"] : null,
     ["dis", u.disabled ? "הפעלה" : "השבתה"], ["del", "מחיקה"]].filter(Boolean) : [["name", "עריכת השם שלי"]];
   const el = document.createElement("div"); el.className = "rowmenu"; el.setAttribute("role", "menu");
@@ -209,6 +221,10 @@ $("#cpBody").addEventListener("input", e => {
   const t = e.target;
   if (t.id === "cpQ") { CQ = t.value; const pos = t.selectionStart; drawUsers(); const q = $("#cpQ"); q.focus(); q.setSelectionRange(pos, pos) }
   else if (t.dataset.rpw != null) pwShow(t, t.parentNode.parentNode.querySelector("[data-rpwchk]"));
+  else if (t.dataset.memail != null) { // an unsaved edit: save first, then send (the server sends to the saved address)
+    const s = t.closest("[data-resetbox]").querySelector("[data-msend]"), saved = t.dataset.saved || "";
+    s.disabled = !saved || t.value.trim().toLowerCase() !== saved; s.title = s.disabled && saved ? "קודם שמירת המייל" : "";
+  }
 });
 $("#cpBody").addEventListener("click", async e => {
   const t = e.target;
@@ -229,6 +245,9 @@ $("#cpBody").addEventListener("click", async e => {
       <button type="button" class="btn-blue small" data-nsave>שמירה</button><button type="button" class="link-btn" data-rcancel>ביטול</button></div>`;
     const i = b.querySelector("input"); i.focus(); i.select(); return;
   }
+  if (k === "mail") return openMailBox(row, u);
+  if (t.dataset.msave != null || t.dataset.mdel != null) return saveMail(row, u, t.dataset.mdel != null);
+  if (t.dataset.msend != null) return sendDetailsTo(u, row.querySelector("[data-memail]").dataset.saved); // the mail goes to the SAVED address
   if (t.dataset.nsave != null) return saveName(row, u);
   if (t.dataset.rcancel != null) { const b = row.querySelector("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; row.querySelector("[data-menu]")?.focus(); return }
   if (t.dataset.rsave != null) {
@@ -243,6 +262,39 @@ $("#cpBody").addEventListener("click", async e => {
   if (k === "del") { if (confirm(`למחוק את המשתמש ${n} לצמיתות? אי אפשר לבטל.`)) ctlDo({ action: "delete", user_id: u.user_id }, `${n} נמחק`); return }
 });
 document.addEventListener("click", e => { if (CMENU && !e.target.closest(".rowmenu,[data-menu]")) closeRowMenu() });
+async function openMailBox(row, u) {
+  const b = row.querySelector("[data-resetbox]"); b.hidden = false; b.innerHTML = '<p class="muted small">טוען…</p>';
+  let em = "";
+  try { em = (await fnAuth({ action: "get_contact_email", user_id: u.user_id })).email || "" } catch (e) { b.innerHTML = ""; b.hidden = true; cmsg(errText(e), "err"); return }
+  const id = "mem-" + esc(u.user_id);
+  b.innerHTML = `<label for="${id}">מייל של ${esc(u.username)}</label><div class="copyrow"><input id="${id}" data-memail type="email" dir="ltr" maxlength="254" value="${esc(em)}" autocomplete="off" data-saved="${esc(em)}">
+      <button type="button" class="btn-blue small" data-msave>שמירת המייל</button>${em ? '<button type="button" class="btn-line small danger" data-mdel>הסרה</button>' : ""}<button type="button" class="link-btn" data-rcancel>ביטול</button></div>
+    <p class="muted small">הזן כתובת רק אחרי שהעובד הסכים לקבל מייל ממערכת יאללה־סע.</p>
+    <button type="button" class="btn-line" data-msend${em ? "" : " disabled"}>שליחת פרטים</button>`;
+  b.querySelector("input").focus();
+}
+async function saveMail(row, u, remove) {
+  const i = row.querySelector("[data-memail]"), v = remove ? null : i.value.trim().toLowerCase();
+  if (!remove && !i.checkValidity()) { cmsg(DETAILS_MSG.bad_email, "err"); i.focus(); return }
+  try { await fnAuth({ action: "set_contact_email", user_id: u.user_id, email: v || null }) }
+  catch (e) { cmsg(detailsErr(e), "err"); return }
+  CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
+  cmsg(v ? `המייל של ${u.username} נשמר` : `המייל של ${u.username} הוסר`, "ok");
+}
+async function sendDetailsTo(u, email) {
+  if (!email) { cmsg(DETAILS_MSG.no_email, "err"); return }
+  if (!confirm(`לשלוח פרטי כניסה ל־${email}? הסיסמה הנוכחית של ${u.display_name || u.username} תוחלף בסיסמה זמנית חדשה.`)) return;
+  cmsg("שולח…");
+  try {
+    await fnAuth({ action: "send_details", user_id: u.user_id });
+    CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
+    cmsg(`פרטי הכניסה נשלחו ל־${email}. הסיסמה הזמנית בתוקף 7 ימים.`, "ok");
+  } catch (e) { cmsg(detailsErr(e), "err") }
+}
+$("#cpMsg").addEventListener("click", e => {
+  const b = e.target.closest("[data-sendnew]"); if (!b) return;
+  sendDetailsTo({ user_id: b.dataset.sendnew, username: b.dataset.uname, display_name: b.dataset.dname }, b.dataset.email);
+});
 async function saveName(row, u) {
   const i = row.querySelector("[data-rnm]"), v = i.value.trim();
   if (!v) { cmsg("צריך לכתוב שם", "err"); i.focus(); return }
@@ -288,7 +340,7 @@ function drawMatrix() {
       <span class="muted small">בחר הרשאה בכל משבצת. השינוי נשמר מיד.</span></div>
     <div class="mx-wrap"><table class="mx"><thead><tr><th scope="col">שם</th>${tools.map(t => `<th scope="col">${esc(t.title)}${t.status !== "live" ? '<span class="soon">בקרוב</span>' : ""}</th>`).join("")}</tr></thead>
       <tbody>${rowsM.map(u => `<tr><th scope="row">${esc(u.display_name || u.username)}<span dir="ltr" class="muted small">${esc(u.username)}</span></th>${tools.map(t => `<td>${cell(u, t)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
-    <p class="hint">צופה: רואה הכול. עורך: גם משנה הגדרות, תגבורים ומעברי לילה. מנהל: גם מנהל את המשתמשים של המפעיל. מנהל מערכת: הכול, בכל המפעילים.</p>`;
+    <p class="hint">צופה: רואה הכול. עורך: גם משנה הגדרות, תגבורים ומעברי לילה. מנהל: גם רואה את המשתמשים של המפעיל. מנהל מערכת: הכול, בכל המפעילים.${PLATFORM ? "" : " שינויים במשתמשים נעשים על ידי מנהל המערכת."}</p>`;
 }
 $("#cpBody").addEventListener("change", e => {
   const t = e.target;
@@ -311,7 +363,7 @@ function newOpen() {
     (AO.length ? `<optgroup label="מפעיל">${AO.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}</optgroup>` : "");
   if (!PLATFORM && AO[0]) $("#nOp").value = AO[0].id;
   $("#nRole").innerHTML = ROLES.filter(r => r !== "admin" || PLATFORM).map(r => `<option value="${r}"${r === "editor" ? " selected" : ""}>${ROLEHE[r]}</option>`).join("");
-  for (const id of ["nName", "nUser", "nPw"]) $("#" + id).value = "";
+  for (const id of ["nName", "nUser", "nPw", "nEmail"]) $("#" + id).value = "";
   $("#nRoleBox").hidden = $("#nOp").value === "platform"; pwShow($("#nPw"), $("#nPwChk")); $("#nMsg").textContent = "";
   d.showModal(); $("#nOp").focus();
 }
@@ -324,12 +376,18 @@ $("#newForm").addEventListener("submit", async e => {
   e.preventDefault(); const m = $("#nMsg"), user = $("#nUser").value.trim().toLowerCase(), pw = $("#nPw").value, op = $("#nOp").value;
   if (!USERRE.test(user)) { m.className = "msg err"; m.textContent = ERR.bad_username; $("#nUser").focus(); return }
   if (weakPw(pw)) { pwShow($("#nPw"), $("#nPwChk")); m.className = "msg err"; m.textContent = ERR.weak_password; $("#nPw").focus(); return }
-  const role = op === "platform" ? "platform" : $("#nRole").value;
+  const role = op === "platform" ? "platform" : $("#nRole").value, email = $("#nEmail").value.trim().toLowerCase();
+  if (email && !$("#nEmail").checkValidity()) { m.className = "msg err"; m.textContent = DETAILS_MSG.bad_email; $("#nEmail").focus(); return }
   m.className = "msg"; m.textContent = "יוצר…"; $("#nSave").disabled = true;
   try {
-    await fnAuth({ action: "create", username: user, display_name: $("#nName").value.trim(), ...(role === "platform" ? {} : { operator_id: op }), role, password: pw });
+    const name = $("#nName").value.trim();
+    const r = await fnAuth({ action: "create", username: user, display_name: name, ...(role === "platform" ? {} : { operator_id: op }), role, password: pw, ...(email ? { email } : {}) });
     $("#dlgNew").close(); CTAB = "users"; await cpDraw(true);
     cmsg(`נוצר המשתמש ${user} עם הסיסמה הזמנית ${pw} . העבר לו את שניהם. בכניסה הראשונה הוא יבחר סיסמה חדשה.`, "ok");
+    if (email && r && r.user_id) {
+      const sb = document.createElement("button"); sb.type = "button"; sb.className = "btn-blue small"; sb.textContent = "שליחת פרטים במייל";
+      Object.assign(sb.dataset, { sendnew: r.user_id, email, uname: user, dname: name }); $("#cpMsg").append(" ", sb);
+    }
   } catch (err) { m.className = "msg err"; m.textContent = errText(err) } finally { $("#nSave").disabled = false }
 });
 
