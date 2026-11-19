@@ -326,6 +326,20 @@ $("#cpBody").addEventListener("keydown", e => {
 });
 
 // ---------- permissions per tool ----------
+// Option A (David, 2026-11-19): today the notices module runs inside the planning tool, whose database also checks the
+// planning role. So a notices role needs a planning-tool role, and יוצר פרסומים needs editor there. A warning only, never
+// a block: option B (notices separate from the planning tool) follows, and then this warning is removed.
+const NOTICE_NEEDS_STUDIO = "כדי לעבוד בפרסומים צריך גם תפקיד בכלי התכנון", CREATE_NEEDS_EDITOR = "יוצר פרסומים צריך גם עורך בכלי התכנון";
+function noticeWarn(u, opF) {
+  if (u.platform) return [];
+  const g = (u.tools || []).filter(m => !opF || m.operator_id === opF.id), out = new Set();
+  for (const n of g.filter(m => m.module === "notice-check" || m.module === "notice-create")) {
+    const studio = g.find(m => m.module === "studio" && m.operator_id === n.operator_id);
+    if (!studio) out.add(NOTICE_NEEDS_STUDIO);
+    else if (n.module === "notice-create" && (RANK[n.role] || 0) >= RANK.editor && (RANK[studio.role] || 0) < RANK.editor) out.add(CREATE_NEEDS_EDITOR);
+  }
+  return [...out];
+}
 function drawMatrix() {
   const AO = adminOps(), tools = (TILES || []).filter(t => t.module);
   if (CFILTER && !AO.some(o => o.id === CFILTER)) CFILTER = "";
@@ -352,7 +366,7 @@ function drawMatrix() {
       <label class="pill-sel"><span>מפעיל:</span><select id="cpOp">${PLATFORM || AO.length > 1 ? `<option value="">כל המפעילים</option>` : ""}${AO.map(o => `<option value="${esc(o.id)}"${o.id === CFILTER ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>
       <span class="muted small">בחר הרשאה בכל משבצת. השינוי נשמר מיד.</span></div>
     <div class="mx-wrap"><table class="mx"><thead><tr><th scope="col">שם</th>${tools.map(t => `<th scope="col">${esc(t.title)}${t.status !== "live" ? '<span class="soon">בקרוב</span>' : ""}</th>`).join("")}</tr></thead>
-      <tbody>${rowsM.map(u => `<tr><th scope="row">${esc(u.display_name || u.username)}<span dir="ltr" class="muted small">${esc(u.username)}</span></th>${tools.map(t => `<td>${cell(u, t)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <tbody>${rowsM.map(u => `<tr><th scope="row">${esc(u.display_name || u.username)}<span dir="ltr" class="muted small">${esc(u.username)}</span>${noticeWarn(u, opF).map(w => `<span class="mx-warn" role="note">${esc(w)}</span>`).join("")}</th>${tools.map(t => `<td>${cell(u, t)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
     <p class="hint">צופה: רואה הכול. עורך: גם משנה הגדרות, תגבורים ומעברי לילה. מנהל: גם רואה את המשתמשים של המפעיל. מנהל מערכת: הכול, בכל המפעילים.${PLATFORM ? "" : " שינויים במשתמשים נעשים על ידי מנהל המערכת."}</p>`;
 }
 $("#cpBody").addEventListener("change", e => {
