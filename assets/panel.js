@@ -104,8 +104,8 @@ async function cpOpen(tab) {
   let st = "ok", note = "";
   if (CTAB !== "sec") { // the code is asked here, when the panel opens, not at sign-in
     try { st = await stepUp() } catch (e) { st = "cancel"; alert(errText(e)) }
-    if (st === "cancel") { (cpReturn && cpReturn.isConnected ? cpReturn : $("#cpBtn")).focus?.(); return }
-    if (st === "none") { CTAB = "sec"; note = NEED_ENROLL }
+    if (st === "cancel") { PENDING = null; (cpReturn && cpReturn.isConnected ? cpReturn : $("#cpBtn")).focus?.(); return }
+    if (st === "none") { PENDING = null; CTAB = "sec"; note = NEED_ENROLL }
   }
   P().hidden = false; document.body.classList.add("cp-open"); window.scrollTo(0, 0);
   // a screen of its own: the address shows it, and the browser's back button / the logo return home
@@ -129,7 +129,12 @@ window.addEventListener("popstate", () => {
   const q = new URLSearchParams(location.search), panel = q.get("panel"), who = q.get("user");
   if (!panel) return cpClose(true);
   if (P().hidden) { if (who) PENDING = { id: who, push: false }; return cpOpen(panel) }
-  if (who && panel === "users" && CTL && (CARD && CARD.id === who || openCard(who, false))) return;
+  if (who && panel === "users" && CTL) {
+    if (CARD && CARD.id === who || openCard(who, false)) return;
+    history.replaceState({ cp: 1 }, "", "?panel=users"); // forward onto a user who is gone: the list, and a clean address
+  }
+  const tab = POP_TAB; POP_TAB = null;
+  if (tab) { CARD = null; CTAB = tab; cmsg(""); cpDraw(); return } // a tab clicked on a card: the card entry is left first
   if (CARD) { CTAB = "users"; leaveCard() }
 });
 $("#cpShade").addEventListener("click", () => cpClose());
@@ -138,17 +143,19 @@ document.addEventListener("keydown", e => {
   if (e.key !== "Escape" || P().hidden || $("#dlgNew").open) return;
   if (CARD) { history.back(); return } cpClose();
 });
-const leaveCardUrl = () => { if (CARD) { CARD = null; history.replaceState({ cp: 1 }, "", "?panel=users") } };
-$("#cpTabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) { leaveCardUrl(); CTAB = b.dataset.tab; cmsg(""); cpDraw() } });
+let POP_TAB = null;
+const tabFromCard = tab => { if (!CARD) return false; POP_TAB = tab; history.back(); return true };
+$("#cpTabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b && !tabFromCard(b.dataset.tab)) { CTAB = b.dataset.tab; cmsg(""); cpDraw() } });
 $("#cpTabs").addEventListener("keydown", e => { // arrow keys move between tabs (RTL: right = previous)
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
   const tabs = [...$("#cpTabs").querySelectorAll("[data-tab]:not([hidden])")], i = tabs.indexOf(document.activeElement); if (i < 0) return;
   const n = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowLeft" ? 1 : -1) + tabs.length) % tabs.length;
-  e.preventDefault(); leaveCardUrl(); CTAB = tabs[n].dataset.tab; cpDraw(); tabs[n].focus();
+  e.preventDefault(); tabs[n].focus(); if (!tabFromCard(tabs[n].dataset.tab)) { CTAB = tabs[n].dataset.tab; cpDraw() }
 });
 
+const markTabs = () => { for (const b of $("#cpTabs").querySelectorAll("[data-tab]")) { const on = b.dataset.tab === CTAB; b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1 } };
 async function cpDraw(reload = false) {
-  for (const b of $("#cpTabs").querySelectorAll("[data-tab]")) { const on = b.dataset.tab === CTAB; b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1 }
+  markTabs();
   const box = $("#cpBody");
   if (CTAB === "sec") return drawSec();
   if (aal() !== "aal2") { // e.g. a tab clicked after the session dropped to aal1 (password change): ask again
@@ -162,7 +169,9 @@ async function cpDraw(reload = false) {
     catch (e) { box.innerHTML = `<p class="msg err">${esc(errText(e))}</p>`; return }
   }
   if (PENDING) { const w = PENDING; PENDING = null; if (openCard(w.id, w.push)) return; if (!w.push) history.replaceState({ cp: 1 }, "", "?panel=users") }
-  if (CARD && userOf(CARD.id)) drawCard(); else { CARD = null; drawUsers() }
+  if (!CARD) return drawUsers();
+  if (userOf(CARD.id)) return drawCard();
+  CARD = null; drawUsers(); if (/[?&]user=/.test(location.search)) history.back(); // the card's user is gone (deleted): back to the list entry
 }
 
 // ---------- users ----------
@@ -262,7 +271,7 @@ function openCard(id, push = true) {
   const u = userOf(id); if (!canCard(u)) return false;
   CARD = { id, op: firstOp(u) };
   if (push) history.pushState({ cp: 1 }, "", "?panel=users&user=" + encodeURIComponent(id));
-  CTAB = "users"; cmsg(""); drawCard(); window.scrollTo(0, 0); $("#ucName")?.focus();
+  CTAB = "users"; markTabs(); cmsg(""); drawCard(); window.scrollTo(0, 0); $("#ucName")?.focus();
   return true;
 }
 function leaveCard() { // back to the list, focus on the pencil of the user just left
@@ -277,7 +286,7 @@ function drawCard(keep = {}) {
     if (keep.disp == null && $("#ucDisp")) keep.disp = $("#ucDisp").value;
     if (keep.mail == null && $("#ucMail") && !$("#ucMail").disabled) keep.mail = $("#ucMail").value;
   }
-  if (!u) { CARD = null; history.replaceState({ cp: 1 }, "", "?panel=users"); drawUsers(); return }
+  if (!u) { CARD = null; drawUsers(); if (/[?&]user=/.test(location.search)) history.back(); return }
   const full = !u.me, nm = u.display_name || u.username, op = CARD.op, orgs = orgsOf(u);
   const chips = [u.disabled ? ["מושבת", "off"] : u.must_change ? ["צריך להחליף סיסמה", ""] : ["פעיל", "ok"], u.mfa ? ["אימות דו־שלבי פעיל", ""] : null, u.platform ? ["מנהל מערכת", ""] : null]
     .filter(Boolean).map(([t, c]) => `<span class="uc-chip${c ? " uc-chip-" + c : ""}">${t}</span>`).join("");
@@ -333,8 +342,9 @@ async function loadCardMail(u) {
   if (u.has_email && em) $("#ucResetNote").textContent = `תישלח סיסמה זמנית חדשה למייל ${em}, בתוקף 7 ימים.`;
 }
 const cleanMail = v => v.trim().toLowerCase();
-const mailValid = (i, v) => !v || (i.checkValidity() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)); // same rule as the server
+const mailValid = (i, v) => !v || (i.checkValidity() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) && v.length <= 254 && !v.endsWith("@users.yalla-sa.app")); // same rules as the server
 async function saveCard() {
+  if ($("#ucSave")?.disabled) return; // a save is already running
   const id = CARD.id, u = userOf(id), n = u.username, di = $("#ucDisp"), disp = di.value.trim(), mi = $("#ucMail");
   if (!disp) { cmsg("צריך לכתוב שם", "err"); di.focus(); return }
   const mail = mi && !mi.disabled ? cleanMail(mi.value) : null;
@@ -366,7 +376,11 @@ async function setRole(u, mod, op, role) {
   const n = u.username, tn = toolName(mod);
   if (role === "none") {
     if (!confirm(`להסיר את הגישה של ${n} ל${tn}?`)) { drawCard(); return }
-    return ctlDo({ ...(mod === "deadhead" ? { action: "remove_membership" } : { action: "remove_tool_role", module: mod }), user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${tn} הוסרה`);
+    const ok = await ctlDo({ ...(mod === "deadhead" ? { action: "remove_membership" } : { action: "remove_tool_role", module: mod }), user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${tn} הוסרה`);
+    // no access left at the operator shown, but some elsewhere: show that operator (the hint and the selector match again)
+    const nu = ok && CARD && CARD.id === u.user_id && userOf(u.user_id);
+    if (nu && orgsOf(nu).length && !orgsOf(nu).includes(CARD.op)) { CARD.op = firstOp(nu); drawCard() }
+    return ok;
   }
   return ctlDo({ ...(mod === "deadhead" ? { action: "set_membership" } : { action: "set_tool_role", module: mod }), user_id: u.user_id, operator_id: op, role }, `${n} · ${tn}: ${ROLEHE[role]}`);
 }
@@ -402,8 +416,7 @@ async function cardClick(t) {
   if (t.id === "ucDis") { const off = !u.disabled; if (off && !confirm(`להשבית את ${n}? הוא לא יוכל להיכנס עד שיופעל שוב.`)) return; ctlDo({ action: "set_disabled", user_id: u.user_id, disabled: off }, off ? `${n} הושבת` : `${n} הופעל`); return }
   if (t.id === "ucDel") {
     if (!confirm(`למחוק את המשתמש ${n} לצמיתות? אי אפשר לבטל.`)) return;
-    CARD = null; history.replaceState({ cp: 1 }, "", "?panel=users");
-    ctlDo({ action: "delete", user_id: u.user_id }, `${n} נמחק`); return;
+    ctlDo({ action: "delete", user_id: u.user_id }, `${n} נמחק`); return; // done: the redraw finds no user and goes back to the list
   }
 }
 async function cardChange(t) {
@@ -793,3 +806,7 @@ $("#cpBody").addEventListener("submit", async e => {
     msg(/bad_email/.test(m) ? "אחת הכתובות לא תקינה" : /too_many/.test(m) ? "אפשר עד 10 כתובות" : errText(err));
   }
 });
+
+// panel.js may arrive after portal.js already opened the portal (showPortal skips cpSetup while it is not defined yet):
+// set the panel up now, or an admin sees no "פאנל בקרה" button and deep links (?panel=…) do nothing
+if (!$("#portal").hidden) cpSetup();
