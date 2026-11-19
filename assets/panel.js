@@ -221,6 +221,10 @@ $("#cpBody").addEventListener("input", e => {
   const t = e.target;
   if (t.id === "cpQ") { CQ = t.value; const pos = t.selectionStart; drawUsers(); const q = $("#cpQ"); q.focus(); q.setSelectionRange(pos, pos) }
   else if (t.dataset.rpw != null) pwShow(t, t.parentNode.parentNode.querySelector("[data-rpwchk]"));
+  else if (t.dataset.memail != null) { // an unsaved edit: save first, then send (the server sends to the saved address)
+    const s = t.closest("[data-resetbox]").querySelector("[data-msend]"), saved = t.dataset.saved || "";
+    s.disabled = !saved || t.value.trim().toLowerCase() !== saved; s.title = s.disabled && saved ? "קודם שמירת המייל" : "";
+  }
 });
 $("#cpBody").addEventListener("click", async e => {
   const t = e.target;
@@ -243,7 +247,7 @@ $("#cpBody").addEventListener("click", async e => {
   }
   if (k === "mail") return openMailBox(row, u);
   if (t.dataset.msave != null || t.dataset.mdel != null) return saveMail(row, u, t.dataset.mdel != null);
-  if (t.dataset.msend != null) return sendDetailsTo(u, row.querySelector("[data-memail]").value.trim().toLowerCase());
+  if (t.dataset.msend != null) return sendDetailsTo(u, row.querySelector("[data-memail]").dataset.saved); // the mail goes to the SAVED address
   if (t.dataset.nsave != null) return saveName(row, u);
   if (t.dataset.rcancel != null) { const b = row.querySelector("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; row.querySelector("[data-menu]")?.focus(); return }
   if (t.dataset.rsave != null) {
