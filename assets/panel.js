@@ -101,18 +101,25 @@ async function cpOpen(tab) {
     if (st === "cancel") { (cpReturn && cpReturn.isConnected ? cpReturn : $("#cpBtn")).focus?.(); return }
     if (st === "none") { CTAB = "sec"; note = NEED_ENROLL }
   }
-  P().hidden = false; $("#cpShade").hidden = false; document.body.classList.add("cp-open");
+  P().hidden = false; document.body.classList.add("cp-open"); window.scrollTo(0, 0);
+  // a screen of its own: the address shows it, and the browser's back button / the logo return home
+  if (!/[?&]panel=/.test(location.search)) history.pushState({ cp: 1 }, "", "?panel=" + CTAB);
   $("#cpBtn").setAttribute("aria-pressed", "true"); cmsg(note, note ? "err" : ""); cpDraw(true);
   $("#cpClose").focus();
 }
-function cpClose() {
+function cpClose(fromHistory) {
+  if (P().hidden) return;
+  if (!fromHistory && /[?&]panel=/.test(location.search)) history.replaceState(null, "", location.pathname);
   P().hidden = true; $("#cpShade").hidden = true; document.body.classList.remove("cp-open"); $("#cpBtn").setAttribute("aria-pressed", "false");
   const d = $("#dlgNew"); if (d.open) d.close(); closeRowMenu();
   (cpReturn && cpReturn.isConnected ? cpReturn : $("#cpBtn")).focus?.();
 }
 $("#cpBtn").addEventListener("click", () => P().hidden ? cpOpen("users") : cpClose());
-$("#cpClose").addEventListener("click", cpClose);
-$("#cpShade").addEventListener("click", cpClose);
+$("#cpClose").addEventListener("click", () => cpClose());
+// the logo goes back to the home page (as in the deadhead dashboard), without reloading when the panel is open
+document.querySelector("header.top .brand").addEventListener("click", e => { if (!P().hidden) { e.preventDefault(); cpClose() } });
+window.addEventListener("popstate", () => { if (!/[?&]panel=/.test(location.search)) cpClose(true) });
+$("#cpShade").addEventListener("click", () => cpClose());
 $("#userMenu").addEventListener("click", e => { if (e.target.closest("[data-act=security]")) cpOpen("sec") });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape" || P().hidden || $("#dlgNew").open) return;
@@ -198,7 +205,7 @@ function drawUsers() {
         <span role="cell" class="cp-act">${u.manageable || u.me ? `<button type="button" class="dots" data-menu aria-haspopup="true" aria-expanded="false" aria-label="פעולות על ${esc(u.username)}">⋯</button>` : ""}</span>
         <div class="cp-reset" data-resetbox hidden></div></div>`).join("") || '<p class="cp-empty">אין משתמשים שמתאימים לחיפוש</p>'}
     </div>
-    <p class="hint">אין שחזור סיסמה עצמי: מי ששכח סיסמה פונה למנהל, והמנהל קובע לו סיסמה זמנית. בכניסה הבאה הוא בוחר סיסמה חדשה.</p>`;
+    <p class="hint">מי ששכח סיסמה פונה למנהל המערכת, שלוחץ "איפוס סיסמה": למשתמש עם מייל נשלחת סיסמה זמנית במייל; בלי מייל המנהל מעביר לו אותה. בכניסה הבאה הוא בוחר סיסמה חדשה.</p>`;
 }
 const userOf = id => CTL.users.find(u => u.user_id === id);
 function closeRowMenu(focusBack) {
@@ -206,7 +213,7 @@ function closeRowMenu(focusBack) {
 }
 function openRowMenu(btn) {
   closeRowMenu(); const u = userOf(btn.closest("[data-u]").dataset.u);
-  const items = u.manageable ? [["name", "עריכת שם"], ["reset", "סיסמה זמנית"], PLATFORM ? ["mail", "מייל ושליחת פרטים"] : null, u.mfa ? ["mfar", "איפוס אימות דו־שלבי"] : null,
+  const items = u.manageable ? [["name", "עריכת שם"], ["reset", "איפוס סיסמה"], PLATFORM ? ["mail", "עדכון כתובת מייל"] : null, u.mfa ? ["mfar", "איפוס אימות דו־שלבי"] : null,
     PLATFORM ? ["plat", u.platform ? "הסרת מנהל מערכת" : "הפיכה למנהל מערכת"] : null,
     ["dis", u.disabled ? "הפעלה" : "השבתה"], ["del", "מחיקה"]].filter(Boolean) : [["name", "עריכת השם שלי"]];
   const el = document.createElement("div"); el.className = "rowmenu"; el.setAttribute("role", "menu");
@@ -222,10 +229,7 @@ $("#cpBody").addEventListener("input", e => {
   const t = e.target;
   if (t.id === "cpQ") { CQ = t.value; const pos = t.selectionStart; drawUsers(); const q = $("#cpQ"); q.focus(); q.setSelectionRange(pos, pos) }
   else if (t.dataset.rpw != null) pwShow(t, t.parentNode.parentNode.querySelector("[data-rpwchk]"));
-  else if (t.dataset.memail != null) { // an unsaved edit: save first, then send (the server sends to the saved address)
-    const s = t.closest("[data-resetbox]").querySelector("[data-msend]"), saved = t.dataset.saved || "";
-    s.disabled = !saved || t.value.trim().toLowerCase() !== saved; s.title = s.disabled && saved ? "קודם שמירת המייל" : "";
-  }
+
 });
 $("#cpBody").addEventListener("click", async e => {
   const t = e.target;
@@ -233,6 +237,7 @@ $("#cpBody").addEventListener("click", async e => {
   if (t.closest("[data-menu]")) { const b = t.closest("[data-menu]"); return CMENU && CMENU.btn === b ? closeRowMenu(true) : openRowMenu(b) }
   const row = t.closest("[data-u]"); if (!row) return; const u = userOf(row.dataset.u), n = u.username;
   const k = t.dataset.do; if (k) closeRowMenu();
+  if (k === "reset" && u.has_email) return resetByMail(u);
   if (k === "reset") {
     const b = row.querySelector("[data-resetbox]"); b.hidden = false;
     b.innerHTML = `<label for="rpw-${esc(u.user_id)}">סיסמה זמנית ל־${esc(n)}</label><div class="copyrow"><input id="rpw-${esc(u.user_id)}" data-rpw dir="ltr" value="${suggestPw()}" autocomplete="off" aria-describedby="rpwc-${esc(u.user_id)}">
@@ -248,7 +253,6 @@ $("#cpBody").addEventListener("click", async e => {
   }
   if (k === "mail") return openMailBox(row, u);
   if (t.dataset.msave != null || t.dataset.mdel != null) return saveMail(row, u, t.dataset.mdel != null);
-  if (t.dataset.msend != null) return sendDetailsTo(u, row.querySelector("[data-memail]").dataset.saved); // the mail goes to the SAVED address
   if (t.dataset.nsave != null) return saveName(row, u);
   if (t.dataset.rcancel != null) { const b = row.querySelector("[data-resetbox]"); b.hidden = true; b.innerHTML = ""; row.querySelector("[data-menu]")?.focus(); return }
   if (t.dataset.rsave != null) {
@@ -270,8 +274,7 @@ async function openMailBox(row, u) {
   const id = "mem-" + esc(u.user_id);
   b.innerHTML = `<label for="${id}">מייל של ${esc(u.username)}</label><div class="copyrow"><input id="${id}" data-memail type="email" dir="ltr" maxlength="254" value="${esc(em)}" autocomplete="off" data-saved="${esc(em)}">
       <button type="button" class="btn-blue small" data-msave>שמירת המייל</button>${em ? '<button type="button" class="btn-line small danger" data-mdel>הסרה</button>' : ""}<button type="button" class="link-btn" data-rcancel>ביטול</button></div>
-    <p class="muted small">הזן כתובת רק אחרי שהעובד הסכים לקבל מייל ממערכת יאללה־סע.</p>
-    <button type="button" class="btn-line" data-msend${em ? "" : " disabled"}>שליחת פרטים</button>`;
+    <p class="muted small">הזן כתובת רק אחרי שהעובד הסכים לקבל מייל ממערכת יאללה־סע. השמירה לא שולחת מייל: סיסמה חדשה נשלחת מ"איפוס סיסמה".</p>`;
   b.querySelector("input").focus();
 }
 async function saveMail(row, u, remove) {
@@ -282,9 +285,15 @@ async function saveMail(row, u, remove) {
   CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
   cmsg(v ? `המייל של ${u.username} נשמר` : `המייל של ${u.username} הוסר`, "ok");
 }
+// "איפוס סיסמה" for a user with a saved email: the address is read from the server (the one the mail really goes to)
+async function resetByMail(u) {
+  let em = "";
+  try { em = (await fnAuth({ action: "get_contact_email", user_id: u.user_id })).email || "" } catch (e) { cmsg(errText(e), "err"); return }
+  return sendDetailsTo(u, em);
+}
 async function sendDetailsTo(u, email) {
   if (!email) { cmsg(DETAILS_MSG.no_email, "err"); return }
-  if (!confirm(`לשלוח פרטי כניסה ל־${email}? הסיסמה הנוכחית של ${u.display_name || u.username} תוחלף בסיסמה זמנית חדשה.`)) return;
+  if (!confirm(`לאפס את הסיסמה של ${u.display_name || u.username}? תישלח סיסמה זמנית חדשה למייל ${email}, והסיסמה הנוכחית תפסיק לעבוד.`)) return;
   cmsg("שולח…");
   try {
     await fnAuth({ action: "send_details", user_id: u.user_id });
