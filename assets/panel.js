@@ -364,29 +364,40 @@ function newOpen() {
   if (!PLATFORM && AO[0]) $("#nOp").value = AO[0].id;
   $("#nRole").innerHTML = ROLES.filter(r => r !== "admin" || PLATFORM).map(r => `<option value="${r}"${r === "editor" ? " selected" : ""}>${ROLEHE[r]}</option>`).join("");
   for (const id of ["nName", "nUser", "nPw", "nEmail"]) $("#" + id).value = "";
+  mailMode();
   $("#nRoleBox").hidden = $("#nOp").value === "platform"; pwShow($("#nPw"), $("#nPwChk")); $("#nMsg").textContent = "";
   d.showModal(); $("#nOp").focus();
 }
 $("#nOp").addEventListener("change", e => { $("#nRoleBox").hidden = e.target.value === "platform" });
 $("#nPw").addEventListener("input", e => pwShow(e.target, $("#nPwChk")));
+// a valid email: the server picks the temporary password and mails it, so the password box goes away
+const mailOk = () => { const i = $("#nEmail"), v = i.value.trim(); return !!v && i.checkValidity() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) }; // same rule as the server
+function mailMode() { const on = mailOk(); $("#nPwBox").hidden = on; $("#nMailNote").hidden = !on }
+$("#nEmail").addEventListener("input", mailMode);
 $("#nGen").addEventListener("click", () => { $("#nPw").value = suggestPw(); pwShow($("#nPw"), $("#nPwChk")) });
 $("#nCancel").addEventListener("click", () => $("#dlgNew").close());
 $("#nUser").addEventListener("focusout", e => { e.target.value = e.target.value.trim().toLowerCase() });
 $("#newForm").addEventListener("submit", async e => {
   e.preventDefault(); const m = $("#nMsg"), user = $("#nUser").value.trim().toLowerCase(), pw = $("#nPw").value, op = $("#nOp").value;
   if (!USERRE.test(user)) { m.className = "msg err"; m.textContent = ERR.bad_username; $("#nUser").focus(); return }
-  if (weakPw(pw)) { pwShow($("#nPw"), $("#nPwChk")); m.className = "msg err"; m.textContent = ERR.weak_password; $("#nPw").focus(); return }
   const role = op === "platform" ? "platform" : $("#nRole").value, email = $("#nEmail").value.trim().toLowerCase();
-  if (email && !$("#nEmail").checkValidity()) { m.className = "msg err"; m.textContent = DETAILS_MSG.bad_email; $("#nEmail").focus(); return }
+  if (email && !mailOk()) { m.className = "msg err"; m.textContent = DETAILS_MSG.bad_email; $("#nEmail").focus(); return }
+  if (!email && weakPw(pw)) { pwShow($("#nPw"), $("#nPwChk")); m.className = "msg err"; m.textContent = ERR.weak_password; $("#nPw").focus(); return }
   m.className = "msg"; m.textContent = "יוצר…"; $("#nSave").disabled = true;
   try {
     const name = $("#nName").value.trim();
-    const r = await fnAuth({ action: "create", username: user, display_name: name, ...(role === "platform" ? {} : { operator_id: op }), role, password: pw, ...(email ? { email } : {}) });
+    // with an email the password typed here is never used: send_details replaces it and mails a fresh one
+    const r = await fnAuth({ action: "create", username: user, display_name: name, ...(role === "platform" ? {} : { operator_id: op }), role,
+      password: email ? suggestPw() : pw, ...(email ? { email } : {}) });
     $("#dlgNew").close(); CTAB = "users"; await cpDraw(true);
-    cmsg(`נוצר המשתמש ${user} עם הסיסמה הזמנית ${pw} . העבר לו את שניהם. בכניסה הראשונה הוא יבחר סיסמה חדשה.`, "ok");
-    if (email && r && r.user_id) {
-      const sb = document.createElement("button"); sb.type = "button"; sb.className = "btn-blue small"; sb.textContent = "שליחת פרטים במייל";
-      Object.assign(sb.dataset, { sendnew: r.user_id, email, uname: user, dname: name }); $("#cpMsg").append(" ", sb);
+    if (!email) { cmsg(`נוצר המשתמש ${user} עם הסיסמה הזמנית ${pw} . העבר לו את שניהם. בכניסה הראשונה הוא יבחר סיסמה חדשה.`, "ok"); return }
+    cmsg("נוצר המשתמש. שולח מייל…");
+    try {
+      await fnAuth({ action: "send_details", user_id: r.user_id });
+      CTL = await fnAuth({ action: "list" }).catch(() => CTL); drawUsers();
+      cmsg(`נוצר המשתמש ${user} ונשלח אליו מייל עם פרטי הכניסה ל־${email}.`, "ok");
+    } catch (se) {
+      cmsg(`נוצר המשתמש ${user}, אבל המייל לא נשלח: ${detailsErr(se)} אפשר לשלוח שוב מתפריט ⋯ ← מייל ושליחת פרטים.`, "err");
     }
   } catch (err) { m.className = "msg err"; m.textContent = errText(err) } finally { $("#nSave").disabled = false }
 });
