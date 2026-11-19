@@ -234,7 +234,9 @@ async function ctlDo(body, okText) {
 let CARD = null, PENDING = null; // CARD = { id, op (operator shown and edited), mail (saved email, once read) }
 const canCard = u => !!u && (u.me || (PLATFORM && u.manageable));
 const PENCIL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>';
-const cardTools = () => (TILES || []).filter(t => t.module && (t.status === "live" || t.status === "soon")); // "soon" tools can be granted ahead (notices)
+// live tools only: the server accepts only them (TOOL_MODULES). The notices branch adds its "soon" tools here together
+// with widening TOOL_MODULES on the server (review 2026-11-19: a row the server refuses only shows an error).
+const cardTools = () => (TILES || []).filter(t => t.module && t.status === "live");
 const roleAtOp = (u, mod, op) => (grantsOf(u, mod).find(m => m.operator_id === op) || {}).role || "none";
 const initials = u => { const w = (u.display_name || "").trim().split(/\s+/).filter(Boolean); return w.length ? w.slice(0, 2).map(x => x[0]).join("") : (u.username || "?").slice(0, 2).toUpperCase() };
 const dmy = x => { const d = x ? new Date(x) : null; return d && !isNaN(d) ? d.toLocaleDateString("he-IL", { timeZone: "Asia/Jerusalem", day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, ".") : "" };
@@ -267,6 +269,12 @@ function leaveCard() { // back to the list, focus on the pencil of the user just
 }
 function drawCard(keep = {}) {
   const u = userOf(CARD.id);
+  // a redraw of the same card (a role saved, an operator switched) keeps what was typed and not saved yet
+  const was = $("#ucard");
+  if (was && was.dataset.user === CARD.id) {
+    if (keep.disp == null && $("#ucDisp")) keep.disp = $("#ucDisp").value;
+    if (keep.mail == null && $("#ucMail") && !$("#ucMail").disabled) keep.mail = $("#ucMail").value;
+  }
   if (!u) { CARD = null; history.replaceState({ cp: 1 }, "", "?panel=users"); drawUsers(); return }
   const full = !u.me, nm = u.display_name || u.username, op = CARD.op, orgs = orgsOf(u);
   const chips = [u.disabled ? ["מושבת", "off"] : u.must_change ? ["צריך להחליף סיסמה", ""] : ["פעיל", "ok"], u.mfa ? ["אימות דו־שלבי פעיל", ""] : null, u.platform ? ["מנהל מערכת", ""] : null]
@@ -325,7 +333,7 @@ async function loadCardMail(u) {
 const cleanMail = v => v.trim().toLowerCase();
 const mailValid = (i, v) => !v || (i.checkValidity() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)); // same rule as the server
 async function saveCard() {
-  const u = userOf(CARD.id), n = u.username, di = $("#ucDisp"), disp = di.value.trim(), mi = $("#ucMail");
+  const id = CARD.id, u = userOf(id), n = u.username, di = $("#ucDisp"), disp = di.value.trim(), mi = $("#ucMail");
   if (!disp) { cmsg("צריך לכתוב שם", "err"); di.focus(); return }
   const mail = mi && !mi.disabled ? cleanMail(mi.value) : null;
   let nameCh = disp !== (u.display_name || ""), mailCh = mail != null && mail !== (CARD.mail || "");
@@ -336,16 +344,19 @@ async function saveCard() {
   const parts = [], keep = {}; let bad = false;
   if (nameCh) {
     try {
-      await fnAuth({ action: "set_name", user_id: u.user_id, display_name: disp }); parts.push(`השם עודכן ל־${disp}.`);
+      await fnAuth({ action: "set_name", user_id: u.user_id, display_name: disp }); keep.disp = disp; parts.push(`השם עודכן ל־${disp}.`);
       if (u.me) { if (PROFILE) PROFILE.display_name = disp; $("#hello").textContent = `שלום ${disp}`; $("#userName").textContent = disp; $("#menuName").textContent = disp }
     } catch (e) { bad = true; keep.disp = disp; parts.push(`השם לא נשמר: ${errText(e)}`) }
   }
   if (mailCh) {
-    try { await fnAuth({ action: "set_contact_email", user_id: u.user_id, email: mail || null }); CARD.mail = mail; parts.push(mail ? `המייל של ${n} נשמר.` : `המייל של ${n} הוסר.`) }
+    try { await fnAuth({ action: "set_contact_email", user_id: u.user_id, email: mail || null }); if (CARD && CARD.id === id) CARD.mail = mail; keep.mail = mail; parts.push(mail ? `המייל של ${n} נשמר.` : `המייל של ${n} הוסר.`) }
     catch (e) { bad = true; keep.mail = mi.value; parts.push(`המייל לא נשמר: ${detailsErr(e)}`) }
   }
   CTL = await fnAuth({ action: "list" }).catch(() => CTL);
-  if (CARD && userOf(CARD.id)) drawCard(keep);
+  if (!CARD || CARD.id !== id) { cmsg(`${n}: ${parts.join(" ")}`, bad ? "err" : "ok"); return } // another card is open now: leave it as it is
+  const sv = $("#ucSave"); if (sv) sv.disabled = false;
+  if ($("#ucard")) $("#ucard").dataset.user = ""; // the saved values win over the fields being replaced
+  drawCard(keep);
   cmsg(parts.join(" "), bad ? "err" : "ok");
 }
 // one tool's role at one operator, saved at once; "אין גישה" asks first
@@ -364,7 +375,7 @@ async function setCardOp(u, to) {
   if (orgs.length !== 1 || to === from) { CARD.op = to; drawCard(); return }
   if (!confirm(`להעביר את כל ההרשאות של ${u.username} מ־${opName(from)} ל־${opName(to)}?`)) { drawCard(); return }
   CARD.op = to;
-  if (!(await ctlDo({ action: "move_operator", user_id: u.user_id, from, to }, `ההרשאות של ${u.username} עברו ל־${opName(to)}`))) { CARD.op = from; drawCard() }
+  if (!(await ctlDo({ action: "move_operator", user_id: u.user_id, from, to }, `ההרשאות של ${u.username} עברו ל־${opName(to)}`)) && CARD && CARD.id === u.user_id) { CARD.op = from; drawCard() }
 }
 async function cardClick(t) {
   const u = userOf(CARD.id), n = u.username, box = $("#ucard [data-resetbox]");
