@@ -87,9 +87,10 @@ const cmsg = (t, cls = "") => { const m = $("#cpMsg"); m.className = "msg " + cl
 function cpSetup() { // called after the portal opens (portal.js showPortal)
   $("#cpBtn").hidden = !canManage();
   for (const t of ["users", "matrix"]) $(`#cpTabs [data-tab="${t}"]`).hidden = !canManage();
+  $('#cpTabs [data-tab="status"]').hidden = !PLATFORM; // platform status: platform admins only
   // a tool's "users and permissions" link lands here with ?panel=users|matrix|sec
   const q = new URL(location.href), want = q.searchParams.get("panel");
-  if (want) { q.searchParams.delete("panel"); history.replaceState(null, "", q.pathname + q.search); if (["users", "matrix", "sec"].includes(want)) cpOpen(want) }
+  if (want) { q.searchParams.delete("panel"); history.replaceState(null, "", q.pathname + q.search); if (["users", "matrix", "sec", "status"].includes(want)) cpOpen(want) }
 }
 let cpReturn = null;
 async function cpOpen(tab) {
@@ -141,6 +142,7 @@ async function cpDraw(reload = false) {
     const st = await stepUp();
     if (st !== "ok") { box.innerHTML = `<p class="cp-empty">${st === "none" ? esc(NEED_ENROLL) : "צריך להקליד את קוד האימות כדי לראות את המשתמשים וההרשאות."}</p>`; return }
   }
+  if (CTAB === "status") return drawStatus();
   if (reload || !CTL) {
     box.innerHTML = '<p class="cp-empty">טוען…</p>';
     try { [CTL] = await Promise.all([fnAuth({ action: "list" }), loadTiles()]) }
@@ -598,4 +600,61 @@ $("#cpBody").addEventListener("click", async e => {
     await fnAuth({ action: "set_recovery_email", current_password: pw, email: id === "sEmDel" ? null : $("#sEm").value.trim() });
     SEC.rec = await fnAuth({ action: "my_security" }); $("#sRec").innerHTML = recHtml(); smsg("sRecMsg", id === "sEmDel" ? "המייל הוסר" : "המייל נשמר", "ok");
   } catch (err) { smsg("sRecMsg", errText(err), "err") }
+});
+
+// ---------- platform status (spec 2026-11-19-platform-status-design.md §6) ----------
+// read-only view of the hourly check (public.platform_status(): platform admin + aal2). Colors always come with a word.
+const ST_WORD = { ok: "תקין", warn: "אזהרה", bad: "בעיה", unknown: "לא נבדק", manual: "בדיקה ידנית" };
+const ST_GRP = [["cost", "עולה כסף"], ["free", "מכסות חינם"], ["runs", "ריצות ותקינות"], ["manual", "בדיקה ידנית"]];
+const ST_CH = { email: "מייל", whatsapp: "וואטסאפ", off: "כבוי" };
+const stRpc = (fn, args = {}) => sb("/rest/v1/rpc/" + fn, { method: "POST", body: JSON.stringify(args) });
+const hm = x => { const d = x ? new Date(x) : null; return d && !isNaN(d) ? d.toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit" }) : "" };
+function stRow(i) {
+  const pct = i.cap > 0 && i.value != null ? Math.min(100, Math.round(i.value / i.cap * 100)) : null;
+  const lvl = i.level === "manual" ? "manual" : i.level;
+  return `<div class="st-row" data-key="${esc(i.key)}" data-level="${esc(lvl)}">
+    <span class="st-dot st-${esc(lvl)}" aria-hidden="true"></span>
+    <div class="st-name"><b>${esc(i.title)}</b><span class="sr"> – ${esc(ST_WORD[lvl] || lvl)}</span><span class="muted small">${esc(i.explain)}</span></div>
+    <div class="st-read${lvl === "bad" ? " st-badtxt" : ""}">${esc(i.reading)}${i.note ? `<span class="st-note">${esc(i.note)}</span>` : ""}</div>
+    <div class="st-side">${pct != null && i.grp !== "manual" ? `<span class="st-bar" role="meter" aria-label="${esc(i.title)}" aria-valuemin="0" aria-valuemax="${esc(i.cap)}" aria-valuenow="${esc(i.value)}"><span class="st-${esc(lvl)}" data-pct="${pct}"></span></span>` : ""}
+      ${i.link ? `<a class="st-link" href="${esc(i.link)}" target="_blank" rel="noopener">${i.grp === "manual" ? "ללוח של הספק" : "פתיחה ב־GitHub"}</a>` : ""}
+      ${i.grp === "manual" ? '<button type="button" class="btn-line small st-mark">בדקתי עכשיו</button>' : ""}</div>
+  </div>`;
+}
+async function drawStatus() {
+  const box = $("#cpBody");
+  box.innerHTML = '<p class="cp-empty">טוען…</p>';
+  let S;
+  try { S = await stRpc("platform_status") }
+  catch (e) {
+    if (e.status === 403 || /forbidden/.test(e.message)) { box.innerHTML = '<p class="cp-empty">רק מנהל מערכת עם קוד אימות רואה את מצב הפלטפורמה.</p>'; return }
+    box.innerHTML = `<div class="cp-empty"><p class="msg err">לא ניתן לטעון את מצב הפלטפורמה</p><button type="button" class="btn-line small st-retry">נסה שוב</button></div>`; return;
+  }
+  if (CTAB !== "status") return;
+  const items = S.items || [];
+  if (!items.length) { box.innerHTML = '<p class="cp-empty">עוד לא נבדק. הבדיקה הראשונה תרוץ בשעה הקרובה.</p>'; return }
+  const attn = items.filter(i => i.level === "bad" || i.level === "warn"), red = attn.some(i => i.level === "bad");
+  const head = !attn.length ? "הכול תקין" : attn.length === 1 ? "דבר אחד דורש תשומת לב" : `${attn.length} דברים דורשים תשומת לב`;
+  box.innerHTML = `<div class="st-sum st-sum-${attn.length ? (red ? "bad" : "warn") : "ok"}">
+      <span class="st-dot st-${attn.length ? (red ? "bad" : "warn") : "ok"}" aria-hidden="true"></span>
+      <div><b>${head}</b><span class="muted small">נבדק לאחרונה ${esc(hm(S.checked_at))} · נבדק כל שעה</span></div>
+      <button type="button" class="btn-line small st-now">בדיקה עכשיו</button></div>
+    ${ST_GRP.map(([g, t]) => { const rows = items.filter(i => i.grp === g); return rows.length ? `<section class="st-grp"><h3>${t}</h3><div class="st-card">${rows.map(stRow).join("")}</div></section>` : "" }).join("")}
+    <p class="st-foot muted small">התראות: אדום – ${esc(ST_CH[S.alert_channel] || S.alert_channel)} מיד · צהוב – סיכום ב־08:00</p>`;
+  // bar widths through the CSSOM: the site's CSP (style-src 'self') blocks inline style attributes
+  for (const f of box.querySelectorAll(".st-bar [data-pct]")) f.style.width = f.dataset.pct + "%";
+}
+$("#cpBody").addEventListener("click", async e => {
+  if (CTAB !== "status") return;
+  if (e.target.closest(".st-retry")) return drawStatus();
+  const now = e.target.closest(".st-now"), mark = e.target.closest(".st-mark");
+  if (!now && !mark) return;
+  const b = now || mark; b.disabled = true;
+  try {
+    if (now) {
+      if (await stRpc("platform_status_refresh") === "too_soon") { cmsg("אפשר לבדוק שוב בעוד דקה–שתיים"); b.disabled = false; return }
+      cmsg("הבדיקה רצה…"); await new Promise(r => setTimeout(r, 8000)); cmsg(""); return drawStatus();
+    }
+    await stRpc("platform_status_mark", { p_key: mark.closest(".st-row").dataset.key }); return drawStatus();
+  } catch (err) { cmsg(errText(err), "err"); b.disabled = false }
 });
