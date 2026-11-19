@@ -147,8 +147,9 @@ button,input,select{font:inherit;color:inherit}
 .cp-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
 .cp-btn[aria-pressed="true"]{background:var(--ys-tint)}
 .cp-shade{position:fixed;inset:72px 0 0 0;background:rgba(29,35,48,.38);z-index:20}
-.cp{position:fixed;top:72px;bottom:0;right:0;width:min(1000px,78vw);background:#fff;border-inline-start:1px solid var(--ys-line);box-shadow:-12px 0 32px rgba(29,35,48,.14);
-  z-index:21;display:flex;flex-direction:column;padding:22px 28px 0;overflow:hidden}
+/* full screen (David 2026-11-19): the panel covers the page under the top bar; content centered up to 1280px */
+.cp{position:fixed;top:72px;bottom:0;left:0;right:0;width:auto;background:#fff;
+  z-index:21;display:flex;flex-direction:column;padding:22px max(28px,calc((100vw - 1280px) / 2)) 0;overflow:hidden}
 body.cp-open{overflow:hidden}
 .cp-head{display:flex;align-items:center;justify-content:space-between}
 .cp-head h2{margin:0;font-size:28px;font-weight:800}
