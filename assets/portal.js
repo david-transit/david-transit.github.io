@@ -116,7 +116,7 @@ async function loadAccess() {
     getRows("profiles", "select=username,display_name,must_change_password,disabled&user_id=eq." + encodeURIComponent(ME.id)),
     getRows("platform_admins", "select=user_id&user_id=eq." + encodeURIComponent(ME.id)),
     getRows("memberships", "select=operator_id,role&user_id=eq." + encodeURIComponent(ME.id)),
-    getRows("operators", "select=id,slug,name,logo_url&order=name"),
+    getRows("operators", "select=id,slug,name,logo_url,org_type&order=name"),
     // role per tool (2026-11-19). null = table not there yet (migration not applied): tools fall back to the deadhead role
     getRows("tool_roles", "select=operator_id,module,role&user_id=eq." + encodeURIComponent(ME.id)).catch(() => null)]);
   PROFILE = pr[0] || null; PLATFORM = pa.length > 0; MS = ms || []; TR = tr;

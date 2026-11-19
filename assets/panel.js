@@ -144,11 +144,28 @@ function statusOf(u) {
 // grants of one tool: deadhead = memberships, any other tool = its own rows in u.tools
 const grantsOf = (u, mod) => mod === "deadhead" ? u.memberships : (u.tools || []).filter(m => m.module === mod);
 const toolName = mod => ((TILES || []).find(t => t.module === mod) || {}).title || mod;
+const ROLEACT = { viewer: "צפייה", editor: "עריכה", admin: "ניהול" };
+// every grant of the user: deadhead (memberships) + the other tools (tool_roles)
+const allGrants = u => [...u.memberships.map(m => ({ ...m, module: "deadhead" })), ...(u.tools || [])];
+// the organizations the user belongs to (operators of his grants). Name and type come from the operators table
+// (operators.name, operators.org_type), set in the settings, not in code.
+const orgsOf = u => [...new Set(allGrants(u).map(g => g.operator_id))];
+function orgOf(u) {
+  const ids = orgsOf(u);
+  if (!ids.length) return '<span class="muted">—</span>';
+  return ids.map(id => { const o = OPS.find(x => x.id === id);
+    return `<span class="org"><span class="org-n">${esc(o ? o.name : "ארגון אחר")}</span>${o && o.org_type ? `<span class="org-t">${esc(o.org_type)}</span>` : ""}</span>` }).join("")
+    + (u.other_access ? '<span class="muted small">+ ארגונים אחרים</span>' : "");
+}
+// access: only the tools the user can open, each with its role ("כלי התכנון · עריכה"); no organization names
 function accessOf(u) {
   if (u.platform) return '<span class="chip chip-plat">מנהל מערכת</span>';
-  const all = [...u.memberships.map(m => ({ ...m, module: "deadhead" })), ...(u.tools || [])];
-  const c = all.map(m => `<span class="chip">${esc(toolName(m.module))} · ${esc(opName(m.operator_id))} · ${esc(ROLEHE[m.role] || m.role)}</span>`).join("");
-  return (c || '<span class="muted">אין גישה</span>') + (u.other_access ? '<span class="muted small">+ מפעילים אחרים</span>' : "");
+  const order = (TILES || []).map(t => t.module), seen = new Set(), c = [];
+  for (const g of allGrants(u).sort((a, b) => order.indexOf(a.module) - order.indexOf(b.module) || (RANK[b.role] || 0) - (RANK[a.role] || 0))) {
+    const k = g.module + "|" + g.role; if (seen.has(k)) continue; seen.add(k);
+    c.push(`<span class="chip">${esc(toolName(g.module))} · ${esc(ROLEACT[g.role] || g.role)}</span>`);
+  }
+  return c.join("") || '<span class="muted">אין גישה</span>';
 }
 const shown = () => (CTL.users || []).filter(u => !CQ || (u.username + " " + (u.display_name || "")).toLowerCase().includes(CQ.toLowerCase()));
 function drawUsers() {
@@ -158,9 +175,10 @@ function drawUsers() {
         <input id="cpQ" type="search" placeholder="חיפוש משתמש" value="${esc(CQ)}" autocomplete="off"></label>
       <button type="button" class="btn-blue" id="cpNew">+ משתמש חדש</button></div>
     <div class="cp-table" role="table" aria-label="משתמשים">
-      <div class="cp-tr cp-th" role="row"><span role="columnheader">שם</span><span role="columnheader">גישה</span><span role="columnheader">מצב</span><span role="columnheader">כניסה אחרונה</span><span role="columnheader"><span class="sr">פעולות</span></span></div>
+      <div class="cp-tr cp-th" role="row"><span role="columnheader">שם</span><span role="columnheader">שיוך ארגוני</span><span role="columnheader">גישה</span><span role="columnheader">מצב</span><span role="columnheader">כניסה אחרונה</span><span role="columnheader"><span class="sr">פעולות</span></span></div>
       ${rows.map(u => `<div class="cp-tr" role="row" data-u="${esc(u.user_id)}">
         <span role="cell" class="cp-name"><b>${esc(u.display_name || u.username)}${u.me ? ' <span class="muted small">(אתה)</span>' : ""}</b><span dir="ltr">${esc(u.username)}</span></span>
+        <span role="cell" class="cp-org"><span class="cp-lbl">שיוך ארגוני: </span>${orgOf(u)}</span>
         <span role="cell" class="cp-acc">${accessOf(u)}</span>
         <span role="cell" class="cp-st">${statusOf(u)}</span>
         <span role="cell" class="cp-last"><span class="cp-lbl">כניסה אחרונה: </span>${lastSeen(u)}</span>
@@ -248,36 +266,41 @@ function drawMatrix() {
   const AO = adminOps(), tools = (TILES || []).filter(t => t.module);
   if (CFILTER && !AO.some(o => o.id === CFILTER)) CFILTER = "";
   const opF = CFILTER ? OPS.find(o => o.id === CFILTER) : null;
+  // the organization a cell edits: the filter if chosen; else the user's only organization; else (no access yet) the
+  // caller's only administered organization. A user in several organizations (none today) needs the filter to edit.
+  const editOp = u => opF ? opF.id : orgsOf(u).length === 1 ? orgsOf(u)[0] : !orgsOf(u).length && AO.length === 1 ? AO[0].id : "";
+  const chips = ms => [...new Set(ms.map(m => m.role))].map(r => `<span class="chip">${esc(ROLEHE[r] || r)}</span>`).join("") || '<span class="muted">—</span>';
   const cell = (u, t) => {
     if (t.status !== "live") return '<span class="muted" title="הכלי עוד לא פעיל">—</span>';
-    if (u.platform) return '<span class="chip chip-plat">מנהל מערכת</span><span class="opl">כל המפעילים</span>';
-    const ms = grantsOf(u, t.module).filter(m => !opF || m.operator_id === opF.id);
-    if (!opF) return ms.map(m => `<span class="chip">${esc(ROLEHE[m.role])}</span><span class="opl">${esc(opName(m.operator_id))}</span>`).join("") || '<span class="muted">—</span>';
-    const cur = ms[0]?.role || "";
+    if (u.platform) return '<span class="chip chip-plat">מנהל מערכת</span>';
+    const op = editOp(u), ms = grantsOf(u, t.module).filter(m => !opF || m.operator_id === opF.id);
+    if (u.manageable && !op) return `<span title="משויך לכמה ארגונים: כדי לשנות, בחר ארגון בתיבת המפעיל">${chips(ms)}</span>`;
+    if (!u.manageable || !AO.some(o => o.id === op)) return chips(ms);
+    const cur = (ms.find(m => m.operator_id === op) || {}).role || "";
     const canAdmin = PLATFORM || cur === "admin";
-    if (!u.manageable) return cur ? `<span class="chip">${esc(ROLEHE[cur])}</span><span class="opl">${esc(opF.name)}</span>` : '<span class="muted">—</span>';
-    return `<select class="rsel" data-rset="${esc(u.user_id)}" data-mod="${esc(t.module)}" aria-label="הרשאה של ${esc(u.username)} ב${esc(t.title)}, ${esc(opF.name)}">
-        <option value="">אין גישה</option>${ROLES.filter(r => r !== "admin" || canAdmin).map(r => `<option value="${r}"${r === cur ? " selected" : ""}>${ROLEHE[r]}</option>`).join("")}</select>
-      <span class="opl">${esc(opF.name)}</span>`;
+    return `<select class="rsel" data-rset="${esc(u.user_id)}" data-mod="${esc(t.module)}" data-op="${esc(op)}" aria-label="הרשאה של ${esc(u.username)} ב${esc(t.title)}">
+        <option value="">אין גישה</option>${ROLES.filter(r => r !== "admin" || canAdmin).map(r => `<option value="${r}"${r === cur ? " selected" : ""}>${ROLEHE[r]}</option>`).join("")}</select>`;
   };
+  // the operator box only filters the rows (users who belong to that organization)
+  const rowsM = (CTL.users || []).filter(u => !opF || u.platform || orgsOf(u).includes(opF.id));
   $("#cpBody").innerHTML = `<div class="cp-tools">
       <label class="pill-sel"><span>מפעיל:</span><select id="cpOp">${PLATFORM || AO.length > 1 ? `<option value="">כל המפעילים</option>` : ""}${AO.map(o => `<option value="${esc(o.id)}"${o.id === CFILTER ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>
-      <span class="muted small">${opF ? "בחר הרשאה בכל משבצת. השינוי נשמר מיד." : "כדי לשנות הרשאה, בחר מפעיל."}</span></div>
+      <span class="muted small">בחר הרשאה בכל משבצת. השינוי נשמר מיד.</span></div>
     <div class="mx-wrap"><table class="mx"><thead><tr><th scope="col">שם</th>${tools.map(t => `<th scope="col">${esc(t.title)}${t.status !== "live" ? '<span class="soon">בקרוב</span>' : ""}</th>`).join("")}</tr></thead>
-      <tbody>${(CTL.users || []).map(u => `<tr><th scope="row">${esc(u.display_name || u.username)}<span dir="ltr" class="muted small">${esc(u.username)}</span></th>${tools.map(t => `<td>${cell(u, t)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <tbody>${rowsM.map(u => `<tr><th scope="row">${esc(u.display_name || u.username)}<span dir="ltr" class="muted small">${esc(u.username)}</span></th>${tools.map(t => `<td>${cell(u, t)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
     <p class="hint">צופה: רואה הכול. עורך: גם משנה הגדרות, תגבורים ומעברי לילה. מנהל: גם מנהל את המשתמשים של המפעיל. מנהל מערכת: הכול, בכל המפעילים.</p>`;
-  if (!PLATFORM && AO.length === 1 && !CFILTER) { CFILTER = AO[0].id; drawMatrix() }
 }
 $("#cpBody").addEventListener("change", e => {
   const t = e.target;
   if (t.id === "cpOp") { CFILTER = t.value; drawMatrix(); $("#cpOp").focus(); return }
   if (t.dataset.rset) {
-    const u = userOf(t.dataset.rset), op = CFILTER, n = u.username, mod = t.dataset.mod || "deadhead", tn = toolName(mod);
+    const u = userOf(t.dataset.rset), op = t.dataset.op, n = u.username, mod = t.dataset.mod || "deadhead", tn = toolName(mod);
     // each tool keeps its own role: deadhead in memberships, other tools in tool_roles
     const rm = mod === "deadhead" ? { action: "remove_membership" } : { action: "remove_tool_role", module: mod };
     const set = mod === "deadhead" ? { action: "set_membership" } : { action: "set_tool_role", module: mod };
-    if (!t.value) { if (confirm(`להסיר את הגישה של ${n} ל${tn} ב${opName(op)}?`)) ctlDo({ ...rm, user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${tn} ב${opName(op)} הוסרה`); else drawMatrix(); return }
-    ctlDo({ ...set, user_id: u.user_id, operator_id: op, role: t.value }, `${n} · ${tn} · ${opName(op)}: ${ROLEHE[t.value]}`);
+    if (!op) return;
+    if (!t.value) { if (confirm(`להסיר את הגישה של ${n} ל${tn}?`)) ctlDo({ ...rm, user_id: u.user_id, operator_id: op }, `הגישה של ${n} ל${tn} הוסרה`); else drawMatrix(); return }
+    ctlDo({ ...set, user_id: u.user_id, operator_id: op, role: t.value }, `${n} · ${tn}: ${ROLEHE[t.value]}`);
   }
 });
 
