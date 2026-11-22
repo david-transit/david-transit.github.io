@@ -43,6 +43,9 @@ else {
     const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
     await navigator.serviceWorker.ready;
     const { key } = await PFN({ action: "key" });
+    // a subscription made with an earlier key cannot be reused: drop it first (the server key may have been replaced)
+    const old = await reg.pushManager.getSubscription();
+    if (old) { await PFN({ action: "unsubscribe", endpoint: old.endpoint }).catch(() => {}); await old.unsubscribe(); }
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
     await send(sub);
     await PFN({ action: "test" });
