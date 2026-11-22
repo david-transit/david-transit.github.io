@@ -71,6 +71,8 @@ button,input,select{font:inherit;color:inherit}
 .menu-head span{color:var(--ys-muted);text-align:right}
 .menu-item{display:block;width:100%;text-align:right;background:none;border:0;padding:9px 10px;border-radius:6px;cursor:pointer}
 .menu-item:hover,.menu-item:focus-visible{background:var(--ys-bg)}
+.menu-item:disabled{cursor:default;color:var(--ys-muted,#6b7280)}
+.menu-note{margin:0 10px 6px;font-size:13px;color:var(--ys-muted,#6b7280);max-width:240px}
 .menu-btn{display:none;width:44px;height:44px;border:0;background:none;border-radius:8px;cursor:pointer;place-items:center}
 .menu-btn svg{width:26px;height:26px;stroke:var(--ys-char);stroke-width:2;fill:none;stroke-linecap:round}
 #logoutBtn{font-size:16px}
