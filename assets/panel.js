@@ -220,13 +220,13 @@ function drawUsers() {
       ${PLATFORM ? '<button type="button" class="btn-blue" id="cpNew">+ משתמש חדש</button>' : ""}</div>
     ${PLATFORM ? "" : '<p class="hint">שינויים במשתמשים נעשים על ידי מנהל המערכת.</p>'}
     <div class="cp-table" role="table" aria-label="משתמשים">
-      <div class="cp-tr cp-th" role="row"><span role="columnheader">שם</span><span role="columnheader">שיוך ארגוני</span><span role="columnheader">גישה</span><span role="columnheader">מצב</span><span role="columnheader">כניסה אחרונה</span><span role="columnheader"><span class="sr">פעולות</span></span></div>
+      <div class="cp-tr cp-th" role="row"><span role="columnheader">שם</span><span role="columnheader">שיוך ארגוני</span><span role="columnheader">גישה</span><span role="columnheader">מצב</span><span role="columnheader">פעילות אחרונה</span><span role="columnheader"><span class="sr">פעולות</span></span></div>
       ${rows.map(u => `<div class="cp-tr" role="row" data-u="${esc(u.user_id)}">
         <span role="cell" class="cp-name"><b>${esc(u.display_name || u.username)}${u.me ? ' <span class="muted small">(אתה)</span>' : ""}</b><span dir="ltr">${esc(u.username)}</span>${u.has_email ? '<span class="cp-mail" title="יש כתובת מייל" aria-label="יש כתובת מייל">✉</span>' : ""}</span>
         <span role="cell" class="cp-org"><span class="cp-lbl">שיוך ארגוני: </span>${orgOf(u)}</span>
         <span role="cell" class="cp-acc">${accessOf(u)}</span>
         <span role="cell" class="cp-st">${statusOf(u)}</span>
-        <span role="cell" class="cp-last"><span class="cp-lbl">כניסה אחרונה: </span>${lastSeen(u)}</span>
+        <span role="cell" class="cp-last"><span class="cp-lbl">פעילות אחרונה: </span>${lastSeen(u)}</span>
         <span role="cell" class="cp-act">${canCard(u) ? `<button type="button" class="pencil" data-edit aria-label="עריכת ${esc(u.username)}" title="עריכה">${PENCIL}</button>` : ""}</span></div>`).join("") || '<p class="cp-empty">אין משתמשים שמתאימים לחיפוש</p>'}
     </div>
     <p class="hint">מי ששכח סיסמה פונה למנהל המערכת, שלוחץ "איפוס סיסמה": למשתמש עם מייל נשלחת סיסמה זמנית במייל; בלי מייל המנהל מעביר לו אותה. בכניסה הבאה הוא בוחר סיסמה חדשה.</p>`;
