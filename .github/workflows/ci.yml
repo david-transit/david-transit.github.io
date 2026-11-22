@@ -1,0 +1,29 @@
+# Checks that must pass before merging to main (David 2026-11-22). No Docker, no secrets.
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit and site checks (files, scripts, JSON, no secrets)
+        run: node --test tests/*.test.js
+      - name: Install Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Pages load without JS errors
+        run: node tests/smoke.mjs
