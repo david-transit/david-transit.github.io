@@ -327,6 +327,7 @@ async function showPortal() {
   document.title = OP ? `יאללה־סע · ${OP.name}` : "יאללה־סע";
   document.body.classList.remove("signed");
   if (typeof cpSetup === "function") cpSetup();
+  if (typeof pushSetup === "function") pushSetup(); // push alerts item, support agents only (assets/push.js)
   $("#gate").hidden = true; $("#portal").hidden = false; document.body.classList.remove("is-gate");
   placeOp();
 }
