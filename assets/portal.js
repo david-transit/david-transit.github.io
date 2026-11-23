@@ -91,7 +91,11 @@ async function signIn(user, pw) {
   }
   lsSet("ys_user", user); touchAct();
 }
-async function signOut() { try { if (SES) await authPost("logout", {}, SES.access_token) } catch { } setSes(null); lsSet(TRUST, null) }
+async function signOut() {
+  try { if (SES) await authPost("logout", {}, SES.access_token) } catch { } setSes(null); lsSet(TRUST, null);
+  // end the Cloudflare Access session of the tools too (app.yalla-sa.app); best effort, never blocks the sign-out
+  if (AUTHCFG.accessLogout) try { await Promise.race([fetch(AUTHCFG.accessLogout, { mode: "no-cors", credentials: "include", cache: "no-store" }), new Promise(r => setTimeout(r, 2500))]) } catch { }
+}
 
 // ---------- MFA (TOTP) ----------
 const jwtOf = t => { try { return JSON.parse(atob(String(t).split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) } catch { return {} } };
@@ -103,27 +107,32 @@ async function mfaVerify(fid, code) {
 }
 
 // ---------- access ----------
-let ME = null, PROFILE = null, PLATFORM = false, OPS = [], MS = [], OP = null, MFAF = null, TILES = null;
+let ME = null, PROFILE = null, PLATFORM = false, OPS = [], MS = [], TR = null, OP = null, MFAF = null, TILES = null;
 const ROLEHE = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
 async function loadAccess() {
   ME = SES.user && SES.user.id ? SES.user : await authReq("GET", "user");
   if (!SES.user) { SES.user = ME; lsSet(SKEY, JSON.stringify(SES)) }
-  const [pr, pa, ms, ops] = await Promise.all([
+  const [pr, pa, ms, ops, tr] = await Promise.all([
     getRows("profiles", "select=username,display_name,must_change_password,disabled&user_id=eq." + encodeURIComponent(ME.id)),
     getRows("platform_admins", "select=user_id&user_id=eq." + encodeURIComponent(ME.id)),
     getRows("memberships", "select=operator_id,role&user_id=eq." + encodeURIComponent(ME.id)),
-    getRows("operators", "select=id,slug,name,logo_url&order=name")]);
-  PROFILE = pr[0] || null; PLATFORM = pa.length > 0; MS = ms || [];
-  OPS = (ops || []).filter(o => PLATFORM || MS.some(m => m.operator_id === o.id));
+    getRows("operators", "select=id,slug,name,logo_url,org_type&order=name"),
+    // role per tool (2026-11-19). null = table not there yet (migration not applied): tools fall back to the deadhead role
+    getRows("tool_roles", "select=operator_id,module,role&user_id=eq." + encodeURIComponent(ME.id)).catch(() => null)]);
+  PROFILE = pr[0] || null; PLATFORM = pa.length > 0; MS = ms || []; TR = tr;
+  OPS = (ops || []).filter(o => PLATFORM || MS.some(m => m.operator_id === o.id) || (TR || []).some(m => m.operator_id === o.id));
   // a platform admin is not a member of an operator: the default view is "all operators" (OP = null); picking an
   // operator in the switcher only narrows the view. A member starts at his last (or first) operator.
   const urlOp = new URLSearchParams(location.search).get("op");
   OP = PLATFORM ? (OPS.find(o => o.slug === urlOp) || null) : (OPS.find(o => o.slug === (urlOp || lsGet("ys_op"))) || OPS[0] || null);
 }
-const roleAt = op => PLATFORM ? "admin" : op ? (MS.find(m => m.operator_id === op.id)?.role || null) : null;
+// memberships.role = the deadhead tool's role; every other tool has its own role in tool_roles (separate per tool)
+const roleAt = (op, module = "deadhead") => PLATFORM ? "admin" : !op ? null
+  : module === "deadhead" || !TR ? (MS.find(m => m.operator_id === op.id)?.role || null)
+  : (TR.find(m => m.operator_id === op.id && m.module === module)?.role || null);
 
 // ---------- gate ----------
-let GMODE = "login";
+let GMODE = "login", LASTPW = null;
 const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const fld = (id, label, type, ac, extra = "") => `<div class="field"><label for="${id}">${label}</label>${type === "password"
   ? `<div class="pw-wrap"><input id="${id}" type="password" autocomplete="${ac}" dir="ltr" required ${extra}><button type="button" class="eye" data-eye="${id}" aria-label="הצגת הסיסמה" aria-pressed="false">${EYE}</button></div>`
@@ -132,7 +141,7 @@ function gateMode(m, { err = "", msg = "" } = {}) {
   GMODE = m; document.body.classList.remove("signed"); const uname = (PROFILE && PROFILE.username) || lsGet("ys_user") || "";
   const F = $("#gateFields"), A = $("#gateAlt"), B = $("#gateBtn"), S = $("#gateSub"); B.disabled = false; B.hidden = false;
   if (m === "login") {
-    S.textContent = "שם משתמש וסיסמה של yalla-sa";
+    S.textContent = OAUTH_ID ? "כניסה לכלי דרך yalla-sa: שם משתמש וסיסמה" : "שם משתמש וסיסמה של yalla-sa";
     F.innerHTML = fld("gUser", "שם משתמש", "text", "username", `value="${esc(uname)}" autocapitalize="off" spellcheck="false"`) + fld("gpw", "סיסמה", "password", "current-password")
       + `<label class="trust"><input type="checkbox" id="gTrust" aria-describedby="gTrustHint"${trustUntil() ? " checked" : ""}><span>זה המכשיר האישי שלי: להישאר מחובר ${trustLabel()}</span></label>
       <p class="trust-hint" id="gTrustHint">רק במכשיר אישי עם נעילת מסך. במחשב משותף לא לסמן.</p>`;
@@ -142,10 +151,17 @@ function gateMode(m, { err = "", msg = "" } = {}) {
         <p><b>שכחת סיסמה או שאין לך חשבון?</b> פנה למנהל המערכת אצל המפעיל שלך. הוא יכול לאפס לך סיסמה או ליצור לך משתמש.</p>
         <p><b>מנהל מערכת עם קוד שחזור?</b> <a href="${esc(DEADHEAD)}?recover=1">כניסה עם קוד שחזור</a> (נפתח בכלי תכנון נסיעות ריקות).</p>
       </div>`;
-  } else if (m === "finish") { // forced password change: done in the deadhead tool (manage_users)
-    S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. עושים את זה פעם אחת בכלי תכנון נסיעות ריקות, ואז חוזרים לכאן.`;
-    F.innerHTML = ""; B.textContent = "המשך להשלמת החשבון";
+  } else if (m === "finish") { // forced password change, here in the portal (David 2026-11-19; manage_users change_password)
+    S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. הסיסמה הזמנית משמשת רק לכניסה הראשונה.`;
+    F.innerHTML = (LASTPW ? "" : fld("gpw0", "הסיסמה הזמנית", "password", "current-password"))
+      + fld("gpw", "סיסמה חדשה", "password", "new-password", 'aria-describedby="gpwChk"')
+      + '<div class="msg pwchk muted" id="gpwChk" aria-live="polite">לפחות 8 תווים, עם אותיות באנגלית ומספרים</div>'
+      + fld("gpw2", "הסיסמה החדשה שוב", "password", "new-password");
+    B.textContent = "שמירת הסיסמה והמשך";
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="logout">יציאה</button>`;
+  } else if (m === "oauth") { // signing in to a tool through the portal (single gate)
+    S.textContent = err ? "הכניסה לכלי לא הושלמה." : "מעביר אותך לכלי…";
+    F.innerHTML = ""; B.textContent = "לדף הבית של yalla-sa"; B.hidden = !err; A.innerHTML = "";
   } else if (m === "noaccess") {
     S.textContent = `החשבון ${uname} עוד לא שויך לאף מפעיל. פנה למנהל המערכת.`;
     F.innerHTML = ""; B.textContent = "יציאה"; A.innerHTML = "";
@@ -161,12 +177,41 @@ async function nextUrl() {
   const ok = TILES.some(t => t.status === "live" && typeof t.url === "string" && t.url.startsWith("/") && n.startsWith(t.url));
   return ok ? n : "";
 }
+// ---------- single gate: Supabase OAuth server -> Cloudflare Access (app.yalla-sa.app) ----------
+// Supabase sends the browser to /oauth/consent?authorization_id=… (-> /?authorization_id=…). After the usual sign-in the
+// portal approves the request with no consent screen, but ONLY for the Access client and its callback; anything else is
+// refused and the browser is NOT sent to it. Supabase remembers an approval, so the next requests come back approved.
+const OAUTH_ID = (() => { const v = new URLSearchParams(location.search).get("authorization_id") || ""; return /^[A-Za-z0-9_-]{8,128}$/.test(v) ? v : "" })();
+const okCallback = u => { try { const a = new URL(u), b = new URL(AUTHCFG.accessCallback); return a.origin === b.origin && a.pathname === b.pathname } catch { return false } };
+async function oauthConsent() {
+  gateMode("oauth");
+  try {
+    const d = await authReq("GET", "oauth/authorizations/" + encodeURIComponent(OAUTH_ID));
+    if (d && d.redirect_url && !d.authorization_id) { // approved before: Supabase answers with the way back
+      if (!okCallback(d.redirect_url)) throw new Error("oauth_client");
+      location.replace(d.redirect_url); return;
+    }
+    if (!AUTHCFG.accessClientId || !d || !d.client || d.client.id !== AUTHCFG.accessClientId || !okCallback(d.redirect_uri)) {
+      authReq("POST", `oauth/authorizations/${encodeURIComponent(OAUTH_ID)}/consent`, { action: "deny" }).catch(() => { });
+      throw new Error("oauth_client");
+    }
+    const r = await authReq("POST", `oauth/authorizations/${encodeURIComponent(OAUTH_ID)}/consent`, { action: "approve" });
+    if (!r || !okCallback(r.redirect_url)) throw new Error("oauth_client");
+    location.replace(r.redirect_url);
+  } catch (e) {
+    console.warn("oauth", e);
+    gateMode("oauth", { err: /oauth_client/.test(e.message) ? "בקשת הכניסה לא הגיעה מכלי מוכר של yalla-sa, ולכן לא אושרה."
+      : e.status === 404 || e.status === 400 ? "פג תוקף בקשת הכניסה. פתח שוב את הכלי."
+      : errText(e) });
+  }
+}
 // returns true when the portal can open
 async function unlock() {
   await loadAccess();
   if (PROFILE && PROFILE.disabled) { await signOut(); gateMode("login", { err: ERR.disabled }); return false }
   if (PROFILE && PROFILE.must_change_password) { gateMode("finish"); return false }
   if (!OP && !PLATFORM) { gateMode("noaccess"); return false }
+  if (OAUTH_ID) { await oauthConsent(); return true }
   const nx = await nextUrl(); if (nx) { location.replace(nx); return true }
   await showPortal();
   return true;
@@ -195,7 +240,7 @@ $("#gateForm").addEventListener("keydown", e => {
   if (/[֐-׿]/.test(e.key || "")) { $("#gateWarn").textContent = "שים לב: המקלדת בעברית. עבור לאנגלית (Alt+Shift) לפני הקלדת שם המשתמש והסיסמה."; return }
   kbWarn();
 });
-$("#gateForm").addEventListener("input", kbWarn);
+$("#gateForm").addEventListener("input", e => { kbWarn(); if (e.target.id === "gpw" && GMODE === "finish") pwShow(e.target, $("#gpwChk")) });
 $("#gateForm").addEventListener("submit", async e => {
   e.preventDefault(); const m = $("#gateMsg"); m.className = "msg"; m.textContent = "רגע…"; $("#gateBtn").disabled = true;
   try {
@@ -203,11 +248,20 @@ $("#gateForm").addEventListener("submit", async e => {
       const user = $("#gUser").value.trim().toLowerCase(), pw = $("#gpw").value; $("#gUser").value = user;
       if (!user || !pw) throw new Error("invalid_credentials");
       const trust = !!$("#gTrust")?.checked;
-      await signIn(user, pw); lsSet(TRUST, null);
+      await signIn(user, pw); lsSet(TRUST, null); LASTPW = pw; // kept in memory only, for a forced password change right after
       // personal device: recorded on the server for this session (listed and disconnectable in the control panel)
       if (trust) try { const r = await fnAuth({ action: "trust_device", hours: TRUST_H }); lsSet(TRUST, String(Date.parse(r.expires_at))) } catch (e) { console.warn("trust_device", e) }
       await unlock();
-    } else if (GMODE === "finish") { location.assign(DEADHEAD) }
+    } else if (GMODE === "finish") {
+      const cur = LASTPW || $("#gpw0").value, pw = $("#gpw").value;
+      if (!cur) throw new Error("wrong_password");
+      if (weakPw(pw)) { pwShow($("#gpw"), $("#gpwChk")); throw new Error("weak_password") }
+      if (pw !== $("#gpw2").value) throw new Error("הסיסמאות לא זהות");
+      await fnAuth({ action: "change_password", current_password: cur, new_password: pw }); // asks for the 2-step code when needed
+      await signIn(PROFILE?.username || lsGet("ys_user") || "", pw); LASTPW = null; // a password change ends the old sessions
+      await unlock();
+    }
+    else if (GMODE === "oauth") { location.replace("/") }
     else if (GMODE === "noaccess") { await signOut(); gateMode("login") }
   } catch (err) {
     m.className = "msg err"; m.textContent = errText(err); $("#gateBtn").disabled = false;
@@ -227,11 +281,12 @@ async function loadTiles() {
   const r = await fetch("tiles.json", { cache: "no-cache" }); if (!r.ok) throw new Error("tiles " + r.status);
   return TILES = await r.json();
 }
-// Until the identity migration (docs/identity-migration.sql) is approved: a live tile needs a membership at the chosen
-// operator with role >= min_role (platform admins see all). "soon" tiles show to everyone, not clickable.
+// A live tile needs, at the chosen operator, a role in that tool (deadhead: memberships; others: tool_roles)
+// with role >= min_role (platform admins see all). "soon" tiles show to everyone, not clickable.
 const RANK = { viewer: 1, editor: 2, admin: 3 };
-const canOpen = t => { const r = roleAt(OP); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
-function tileUrl(t) { const u = new URL(t.url, location.href); if (OP) u.searchParams.set("op", OP.slug); return u.href }
+const canOpen = t => { const r = roleAt(OP, t.module); return !!r && (RANK[r] || 0) >= (RANK[t.min_role] || 1) };
+// ?op= only for tools on this site; another domain (app.yalla-sa.app) has its own sign-in and operator choice
+function tileUrl(t) { const u = new URL(t.url, location.href); if (OP && u.origin === location.origin) u.searchParams.set("op", OP.slug); return u.href }
 const ALLOPS = "כל המפעילים";
 function drawTiles() {
   const list = (TILES || []).filter(t => t.status === "soon" || (t.status === "live" && t.url && canOpen(t)));
@@ -254,7 +309,7 @@ function drawOperator() {
   const lg = $("#opLogo"), src = OP && OP.logo_url && /^assets\/operators\/[a-z0-9-]+\.(png|svg|webp)$/.test(OP.logo_url) ? OP.logo_url : "";
   lg.hidden = !src; if (src) { lg.src = src; lg.alt = "" }
   if (OP && !PLATFORM) lsSet("ys_op", OP.slug);
-  const r = roleAt(OP); $("#menuRole").textContent = PLATFORM ? "מנהל מערכת" : r ? `${ROLEHE[r]} · ${OP.name}` : "";
+  const r = roleAt(OP) || (OP && (TR || []).find(m => m.operator_id === OP.id)?.role); $("#menuRole").textContent = PLATFORM ? "מנהל מערכת" : r ? `${ROLEHE[r]} · ${OP.name}` : "";
 }
 $("#opLogo").addEventListener("error", e => { e.target.hidden = true });
 $("#opSel").addEventListener("change", e => {
@@ -272,6 +327,7 @@ async function showPortal() {
   document.title = OP ? `יאללה־סע · ${OP.name}` : "יאללה־סע";
   document.body.classList.remove("signed");
   if (typeof cpSetup === "function") cpSetup();
+  if (typeof pushSetup === "function") pushSetup(); // push alerts item, support agents only (assets/push.js)
   $("#gate").hidden = true; $("#portal").hidden = false; document.body.classList.remove("is-gate");
   placeOp();
 }

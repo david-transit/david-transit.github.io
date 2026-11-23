@@ -2,9 +2,9 @@
   {"id": "deadhead", "title": "תכנון נסיעות ריקות", "desc": "סידורי רכב, נסיעות ריקות וחיסכון", "icon": "bus",
    "url": "/deadhead-dashboard/", "status": "live", "module": "deadhead", "min_role": "viewer", "handoff": "none"},
   {"id": "notice-check", "title": "בודק פרסומים", "desc": "בדיקת פרסומים לציבור מול GTFS", "icon": "doc-check",
-   "url": null, "status": "soon", "module": "notice-check", "min_role": "viewer"},
+   "url": "https://app.yalla-sa.app/notices/projects", "status": "soon", "module": "notice-check", "min_role": "viewer"},
   {"id": "notice-create", "title": "יוצר פרסומים", "desc": "הכנת פרסומים על שינויים בקווים", "icon": "doc-pen",
-   "url": null, "status": "soon", "module": "notice-create", "min_role": "editor"},
+   "url": "https://app.yalla-sa.app/notices/projects", "status": "soon", "module": "notice-create", "min_role": "editor"},
   {"id": "studio", "title": "כלי התכנון", "desc": "תכנון קווים, לוחות זמנים וסידורים", "icon": "map",
-   "url": null, "status": "soon", "module": "studio", "min_role": "viewer"}
+   "url": "https://app.yalla-sa.app/", "status": "live", "module": "studio", "min_role": "viewer"}
 ]

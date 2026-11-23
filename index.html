@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <!-- Same policy as the deadhead tool: every script is a file, no inline script or handler; frame.js refuses framing. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://xghfcdgettrcdciwwzbl.supabase.co; base-uri 'none'; form-action 'self'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://xghfcdgettrcdciwwzbl.supabase.co https://app.yalla-sa.app; base-uri 'none'; form-action 'self'; object-src 'none'; worker-src 'self'; manifest-src 'self'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<script src="assets/frame.js"></script>
+<script src="assets/frame.js?v=2026-11-19.12"></script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>יאללה־סע</title>
 <meta name="theme-color" content="#ffffff">
 <link rel="icon" href="assets/brand/yalla-sa-mark-v6.svg" type="image/svg+xml">
-<link rel="stylesheet" href="assets/fonts/fonts.css">
-<link rel="stylesheet" href="assets/portal.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/app/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/fonts/fonts.css?v=2026-11-19.12">
+<link rel="stylesheet" href="assets/portal.css?v=2026-11-19.12">
 </head>
 <body class="is-gate">
 
@@ -27,6 +29,7 @@
     <button id="gateBtn" class="btn-primary" type="submit">כניסה</button>
     <div id="gateAlt" class="gate-alt"></div>
   </form>
+  <p id="gateContact" class="gate-contact">צריך עזרה? צור קשר: <a href="mailto:support@yalla-sa.app" dir="ltr">support@yalla-sa.app</a></p>
 </main>
 
 <!-- ===== portal ===== -->
@@ -52,6 +55,8 @@
         <div id="userMenu" class="menu" hidden>
           <div class="menu-head"><b id="menuName"></b><span id="menuUser" dir="ltr"></span><span id="menuRole"></span></div>
           <button type="button" class="menu-item" data-act="security">האבטחה שלי</button>
+          <button type="button" class="menu-item" id="pushItem" hidden>הפעל התראות על פניות</button>
+          <p id="pushNote" class="menu-note" role="status" hidden></p>
           <button type="button" class="menu-item" data-act="logout">יציאה</button>
         </div>
       </div>
@@ -71,12 +76,12 @@
   </main>
   <!-- control panel: docked on the right over the dimmed tiles page (approved reference design/control-panel-reference-v1.webp) -->
   <div id="cpShade" class="cp-shade" hidden></div>
-  <section id="cp" class="cp" role="dialog" aria-modal="true" aria-labelledby="cpTitle" hidden>
+  <section id="cp" class="cp" role="region" aria-labelledby="cpTitle" hidden>
     <div class="cp-head"><h2 id="cpTitle">פאנל בקרה</h2><button id="cpClose" class="cp-x" type="button" aria-label="סגירת פאנל הבקרה">✕</button></div>
     <div id="cpTabs" class="cp-tabs" role="tablist" aria-label="פאנל בקרה">
       <button type="button" role="tab" data-tab="users" aria-controls="cpBody">משתמשים</button>
-      <button type="button" role="tab" data-tab="matrix" aria-controls="cpBody">הרשאות לפי כלי</button>
       <button type="button" role="tab" data-tab="sec" aria-controls="cpBody">האבטחה שלי</button>
+      <button type="button" role="tab" data-tab="status" aria-controls="cpBody" hidden>לוח מדדים</button>
     </div>
     <p id="cpMsg" class="msg" role="status"></p>
     <div id="cpBody" class="cp-body" role="tabpanel" tabindex="-1"></div>
@@ -87,12 +92,14 @@
       <div class="frow"><label for="nOp">סוג גישה</label><select id="nOp"></select></div>
       <div class="frow"><label for="nName">שם מלא</label><input id="nName" maxlength="80"></div>
       <div class="frow"><label for="nUser">שם משתמש</label><input id="nUser" dir="ltr" autocapitalize="off" spellcheck="false" aria-describedby="nUserHint"><span id="nUserHint" class="muted small">אותיות באנגלית, ספרות, נקודה, מקף או קו תחתון</span></div>
-      <div class="frow"><label for="nPw">סיסמה זמנית</label><div class="copyrow"><input id="nPw" dir="ltr" autocomplete="new-password" aria-describedby="nPwChk"><button type="button" class="btn-line small" id="nGen">הצעה</button></div>
+      <div class="frow"><label for="nEmail">מייל (לא חובה)</label><input id="nEmail" type="email" dir="ltr" maxlength="254" autocomplete="off" aria-describedby="nEmailHint"><span id="nEmailHint" class="muted small">הזן כתובת רק אחרי שהעובד הסכים לקבל מייל ממערכת יאללה־סע.</span></div>
+      <p id="nMailNote" class="msg ok" hidden>פרטי ההתחברות עם סיסמה זמנית יישלחו במייל.</p>
+      <div class="frow" id="nPwBox"><label for="nPw">סיסמה זמנית</label><div class="copyrow"><input id="nPw" dir="ltr" autocomplete="new-password" aria-describedby="nPwChk"><button type="button" class="btn-line small" id="nGen">הצעה</button></div>
         <div class="msg pwchk muted" id="nPwChk" aria-live="polite"></div></div>
-      <div class="frow" id="nRoleBox"><label for="nRole">רמת הרשאה</label><select id="nRole"></select></div>
+      <div class="frow" id="nRoleBox"><span class="flbl">הרשאה בכל כלי</span><div id="nTools" class="ntools"></div></div>
       <p id="nMsg" class="msg" role="alert"></p>
       <div class="nbtns"><button id="nSave" class="btn-blue">יצירת משתמש</button><button type="button" id="nCancel" class="link-btn">ביטול</button></div>
-      <p class="hint">מעבירים למשתמש את שם המשתמש והסיסמה הזמנית בעצמך. בכניסה הראשונה הוא חייב לבחור סיסמה חדשה.</p>
+      <p class="hint">עם מייל: המערכת שולחת לו את שם המשתמש וסיסמה זמנית. בלי מייל: מעבירים לו אותם בעצמך. בכניסה הראשונה הוא חייב לבחור סיסמה חדשה.</p>
     </form>
   </dialog>
   <dialog id="dlgStep" class="dlg-new dlg-step" aria-labelledby="stTitle">
@@ -108,8 +115,9 @@
   <footer class="foot"><span dir="ltr">yalla-sa</span> · כל כלי באתר נפרד, כניסה אחת לכולם</footer>
 </div>
 
-<script src="assets/auth-settings.js"></script>
-<script src="assets/portal.js"></script>
-<script src="assets/panel.js"></script>
+<script src="assets/auth-settings.js?v=2026-11-19.12"></script>
+<script src="assets/portal.js?v=2026-11-19.12"></script>
+<script src="assets/panel.js?v=2026-11-22.1"></script>
+<script src="assets/push.js?v=2026-11-22.2"></script>
 </body>
 </html>
