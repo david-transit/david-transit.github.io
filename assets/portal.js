@@ -4,11 +4,11 @@
 // Two-step verification is step-up (David, 2026-11-18): sign-in asks only for the password; the code (aal2) is asked
 // when the control panel opens (panel.js) and manage_users enforces aal2 on the server. Basis: no personal data in the
 // system today; re-check when personal data enters (docs/single-login-design.md).
-// The forced password change and the recovery code stay in the deadhead tool; the portal sends the user there.
+// Every sign-in step lives here, none in the tools (David, 23.11.2026, platform map §7.3): forced password change,
+// recovery code (?recover=1), new password from the reset mail (#…type=recovery), and an error a tool sends back (?err=).
 "use strict";
 const SB = "https://xghfcdgettrcdciwwzbl.supabase.co", KEY = "sb_publishable_hCBsqYekz61JY6SFfT_sjw_-wj0QGXT";
 const DOMAIN = "users.yalla-sa.app";
-const DEADHEAD = "/deadhead-dashboard/";
 const SKEY = "ys_session", ACT = "ys_act", TRUST = "ys_trust";
 // durations come from assets/auth-settings.js (one place for the portal and the tools)
 const AUTHCFG = window.YS_AUTH || { trustHours: 12, idleMinutes: 30 }, TRUST_H = +AUTHCFG.trustHours || 12, IDLE_MIN = +AUTHCFG.idleMinutes || 30;
@@ -69,6 +69,8 @@ async function sb(path, opt = {}, retry = true) {
 const getRows = (t, qs) => sb(`/rest/v1/${t}?${qs}`);
 const authReq = async (method, path, body) => http(SB + "/auth/v1/" + path, { method, headers: { apikey: KEY, "Content-Type": "application/json", Authorization: "Bearer " + await token() }, ...(body ? { body: JSON.stringify(body) } : {}) });
 const fnCall = (body) => http(SB + "/functions/v1/manage_users", { method: "POST", headers: { apikey: KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) }, 30000);
+// manage_users as the signed-in user, no step-up dialog (the reset-mail session sets its new password with this)
+const fnTok = async (body) => http(SB + "/functions/v1/manage_users", { method: "POST", headers: { apikey: KEY, "Content-Type": "application/json", Authorization: "Bearer " + await token() }, body: JSON.stringify(body) }, 30000);
 
 // same texts as the deadhead tool
 const ERR = {
@@ -76,7 +78,13 @@ const ERR = {
   not_signed_in: "צריך להיכנס מחדש", "rate limit": "יותר מדי ניסיונות. נסה שוב בעוד כמה דקות", over_request_rate_limit: "יותר מדי ניסיונות. נסה שוב בעוד כמה דקות",
   server_error: "שגיאה בשרת. נסה שוב", mfa_required: "צריך להיכנס מחדש עם קוד האימות הדו־שלבי",
   "Invalid TOTP code": "הקוד שגוי או שפג תוקפו. הקלד את הקוד שמוצג עכשיו באפליקציה", mfa_verification_failed: "הקוד שגוי או שפג תוקפו. הקלד את הקוד שמוצג עכשיו באפליקציה",
-  "Failed to fetch": "אין חיבור לשרת. בדוק את החיבור לאינטרנט ונסה שוב"
+  "Failed to fetch": "אין חיבור לשרת. בדוק את החיבור לאינטרנט ונסה שוב",
+  bad_code: "שם המשתמש או קוד השחזור שגויים, או שהקוד כבר נוצל", weak_password: "הסיסמה צריכה להיות לפחות 8 תווים, עם אותיות ומספרים",
+  not_recovery: "הקישור מהמייל לא תקף או שפג תוקפו (10 דקות). אפשר לבקש קישור חדש: \"אין לי גישה\" ← \"שכחתי סיסמה\"."
+};
+// ?err=<code>: a tool sent the user here because of an error. Only these codes are shown; free text from the URL never is.
+const TOOL_ERR = {
+  mail_link: "הקישור מהמייל לא תקף או שפג תוקפו. אפשר לבקש קישור חדש: \"אין לי גישה\" ← \"שכחתי סיסמה\"."
 };
 const errText = e => { const m = String(e && e.message || e); for (const k in ERR) if (m.includes(k)) return ERR[k]; return /abort/i.test(m) ? "אין תשובה מהשרת. נסה שוב" : m };
 
@@ -149,8 +157,25 @@ function gateMode(m, { err = "", msg = "" } = {}) {
     A.innerHTML = `<button type="button" class="link-btn dim" data-gm="help" aria-expanded="false" aria-controls="gHelp">אין לי גישה</button>
       <div id="gHelp" class="help" hidden>
         <p><b>שכחת סיסמה או שאין לך חשבון?</b> פנה למנהל המערכת אצל המפעיל שלך. הוא יכול לאפס לך סיסמה או ליצור לך משתמש.</p>
-        <p><b>מנהל מערכת עם קוד שחזור?</b> <a href="${esc(DEADHEAD)}?recover=1">כניסה עם קוד שחזור</a> (נפתח בכלי תכנון נסיעות ריקות).</p>
+        <p><b>מנהל מערכת עם מייל לשחזור?</b> הקלד למעלה את שם המשתמש ואז <button type="button" class="link-btn" data-gm="forgot">שכחתי סיסמה</button>: נשלח קישור לבחירת סיסמה חדשה.</p>
+        <p><b>מנהל מערכת עם קוד שחזור?</b> <button type="button" class="link-btn" data-gm="code">כניסה עם קוד שחזור</button></p>
       </div>`;
+  } else if (m === "code") { // one-time recovery code (platform admins): new password, and the lost authenticator is removed
+    S.textContent = "כניסה עם קוד שחזור חד־פעמי (למנהלי מערכת)";
+    F.innerHTML = fld("gUser", "שם משתמש", "text", "username", `value="${esc(uname)}" autocapitalize="off" spellcheck="false"`)
+      + fld("gCode", "קוד שחזור (למשל ABCDE-23456)", "text", "one-time-code", 'autocapitalize="characters" spellcheck="false"')
+      + fld("gpw", "סיסמה חדשה", "password", "new-password", 'aria-describedby="gpwChk"')
+      + '<div class="msg pwchk muted" id="gpwChk" aria-live="polite">לפחות 8 תווים, עם אותיות באנגלית ומספרים</div>'
+      + fld("gpw2", "הסיסמה החדשה שוב", "password", "new-password");
+    B.textContent = "קביעת סיסמה חדשה וכניסה";
+    A.innerHTML = `<button type="button" class="link-btn dim" data-gm="login">חזרה לכניסה רגילה</button>`;
+  } else if (m === "recoverpw") { // arrived from the reset-password mail (a session the mail link opened)
+    S.textContent = "בחירת סיסמה חדשה (מהקישור שנשלח למייל)";
+    F.innerHTML = fld("gpw", "סיסמה חדשה", "password", "new-password", 'aria-describedby="gpwChk"')
+      + '<div class="msg pwchk muted" id="gpwChk" aria-live="polite">לפחות 8 תווים, עם אותיות באנגלית ומספרים</div>'
+      + fld("gpw2", "הסיסמה החדשה שוב", "password", "new-password");
+    B.textContent = "שמירת הסיסמה וכניסה";
+    A.innerHTML = `<button type="button" class="link-btn dim" data-gm="logout">ביטול</button>`;
   } else if (m === "finish") { // forced password change, here in the portal (David 2026-11-19; manage_users change_password)
     S.textContent = `צריך לבחור סיסמה חדשה${uname ? " לחשבון " + uname : ""}. הסיסמה הזמנית משמשת רק לכניסה הראשונה.`;
     F.innerHTML = (LASTPW ? "" : fld("gpw0", "הסיסמה הזמנית", "password", "current-password"))
@@ -221,6 +246,14 @@ $("#gateAlt").addEventListener("click", async e => {
   const b = e.target.closest("[data-gm]"); if (!b) return; const m = b.dataset.gm;
   if (m === "help") { const h = $("#gHelp"); h.hidden = !h.hidden; b.setAttribute("aria-expanded", String(!h.hidden)) }
   else if (m === "logout") { await signOut(); gateMode("login") }
+  else if (m === "login" || m === "code") gateMode(m);
+  else if (m === "forgot") { // the same answer whether or not a mail went out (manage_users)
+    const u = ($("#gUser")?.value || "").trim().toLowerCase(), g = $("#gateMsg");
+    if (!/^[a-z0-9._-]{3,32}$/.test(u)) { g.className = "msg err"; g.textContent = "קודם הקלד את שם המשתמש שלך בשדה \"שם משתמש\"."; $("#gUser")?.focus(); return }
+    g.className = "msg"; g.textContent = "שולח…";
+    try { await fnCall({ action: "forgot", username: u }); g.className = "msg ok"; g.textContent = "אם לחשבון מוגדר מייל לשחזור, נשלח אליו עכשיו קישור לבחירת סיסמה חדשה. בדוק גם בדואר זבל." }
+    catch (err) { g.className = "msg err"; g.textContent = errText(err) }
+  }
 });
 $("#gateFields").addEventListener("click", e => {
   const b = e.target.closest("[data-eye]"); if (!b) return; const i = document.getElementById(b.dataset.eye);
@@ -240,7 +273,7 @@ $("#gateForm").addEventListener("keydown", e => {
   if (/[֐-׿]/.test(e.key || "")) { $("#gateWarn").textContent = "שים לב: המקלדת בעברית. עבור לאנגלית (Alt+Shift) לפני הקלדת שם המשתמש והסיסמה."; return }
   kbWarn();
 });
-$("#gateForm").addEventListener("input", e => { kbWarn(); if (e.target.id === "gpw" && GMODE === "finish") pwShow(e.target, $("#gpwChk")) });
+$("#gateForm").addEventListener("input", e => { kbWarn(); if (e.target.id === "gpw" && ["finish", "code", "recoverpw"].includes(GMODE)) pwShow(e.target, $("#gpwChk")) });
 $("#gateForm").addEventListener("submit", async e => {
   e.preventDefault(); const m = $("#gateMsg"); m.className = "msg"; m.textContent = "רגע…"; $("#gateBtn").disabled = true;
   try {
@@ -260,6 +293,22 @@ $("#gateForm").addEventListener("submit", async e => {
       await fnAuth({ action: "change_password", current_password: cur, new_password: pw }); // asks for the 2-step code when needed
       await signIn(PROFILE?.username || lsGet("ys_user") || "", pw); LASTPW = null; // a password change ends the old sessions
       await unlock();
+    }
+    else if (GMODE === "code") {
+      const user = $("#gUser").value.trim().toLowerCase(), pw = $("#gpw").value; $("#gUser").value = user;
+      if (weakPw(pw)) { pwShow($("#gpw"), $("#gpwChk")); throw new Error("weak_password") }
+      if (pw !== $("#gpw2").value) throw new Error("הסיסמאות לא זהות");
+      const r = await fnCall({ action: "recover_code", username: user, code: $("#gCode").value, new_password: pw });
+      await signIn(user, pw); LASTPW = null;
+      if (r && r.left != null && r.left < 3) alert(`נותרו ${r.left} קודי שחזור. מומלץ ליצור קודים חדשים בפאנל הבקרה, בלשונית "האבטחה שלי".`);
+      await unlock();
+    }
+    else if (GMODE === "recoverpw") {
+      const pw = $("#gpw").value;
+      if (weakPw(pw)) { pwShow($("#gpw"), $("#gpwChk")); throw new Error("weak_password") }
+      if (pw !== $("#gpw2").value) throw new Error("הסיסמאות לא זהות");
+      const r = await fnTok({ action: "recovery_set_password", new_password: pw }); // server-side, only from the mail's session
+      await signIn(r.username, pw); LASTPW = null; await unlock();
     }
     else if (GMODE === "oauth") { location.replace("/") }
     else if (GMODE === "noaccess") { await signOut(); gateMode("login") }
@@ -350,7 +399,28 @@ $("#logoutBtn").addEventListener("click", logout);
 $("#userMenu").addEventListener("click", e => { if (e.target.closest("[data-act=logout]")) logout() });
 
 // ---------- start ----------
+// What a tool or the reset mail hands over: read once, then taken out of the address bar (tokens never stay in history).
+// #access_token=…&type=recovery: the reset mail (directly, or forwarded by a tool that still gets the old link)
+// #error_description=… / ?error_description=…: Supabase refused the mail link (used or expired)
+// ?recover=1: the recovery-code step. ?err=<code>: an error a tool sends back (TOOL_ERR codes only). ?next= is kept.
+function entryState() {
+  const hp = new URLSearchParams(location.hash.slice(1)), q = new URLSearchParams(location.search);
+  const st = { recovery: null, err: "", code: q.get("recover") === "1" };
+  if (hp.get("type") === "recovery" && hp.get("access_token")) st.recovery = { access_token: hp.get("access_token"), refresh_token: hp.get("refresh_token"), expires_in: hp.get("expires_in"), expires_at: hp.get("expires_at") };
+  else if (hp.get("error_description") || hp.get("error_code") || q.get("error_description")) st.err = TOOL_ERR.mail_link;
+  else if (Object.hasOwn(TOOL_ERR, q.get("err") || "")) st.err = TOOL_ERR[q.get("err")];
+  const drop = ["err", "recover", "error", "error_code", "error_description"];
+  if (location.hash || drop.some(k => q.has(k))) {
+    drop.forEach(k => q.delete(k));
+    history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q : ""));
+  }
+  return st;
+}
 (async () => {
+  const st = entryState();
+  if (st.recovery) { setSes(st.recovery); touchAct(); gateMode("recoverpw"); return }
+  if (st.code) { gateMode("code"); return }
+  if (st.err) { gateMode("login", { err: st.err }); return }
   if (SES) {
     try { if (await unlock()) return; return }
     catch (e) { console.warn(e); if (e.status === 401 || e.status === 403 || e.message === "not_signed_in") setSes(null) }

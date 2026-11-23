@@ -27,3 +27,5 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Pages load without JS errors
         run: node tests/smoke.mjs
+      - name: Sign-in steps moved from the tools (tool error, reset mail, recovery code)
+        run: node tests/auth-steps.mjs
