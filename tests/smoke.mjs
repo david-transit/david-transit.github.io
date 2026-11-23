@@ -16,7 +16,7 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.once("listening", r));
 const BASE = `http://127.0.0.1:${server.address().port}`;
 
-const PAGES = ["/", "/?panel=users", "/oauth/consent.html"];
+const PAGES = ["/", "/?panel=users", "/oauth/consent.html", "/support/"];
 const browser = await chromium.launch(process.env.PW_EXEC ? { executablePath: process.env.PW_EXEC } : {});
 let failed = 0;
 for (const vp of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) for (const pg of PAGES) {

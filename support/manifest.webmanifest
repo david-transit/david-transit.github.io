@@ -1,0 +1,12 @@
+{
+  "name": "שירות לקוחות · yalla-sa",
+  "short_name": "פניות",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "/support/",
+  "scope": "/support/",
+  "display": "standalone",
+  "background_color": "#F5F6F8",
+  "theme_color": "#1F4E9A",
+  "icons": [{ "src": "/assets/brand/yalla-sa-mark-v6.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

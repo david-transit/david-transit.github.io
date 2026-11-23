@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://xghfcdgettrcdciwwzbl.supabase.co; base-uri 'none'; form-action 'self'; object-src 'none'">
+<title>שירות לקוחות · yalla-sa</title>
+<script src="../assets/frame.js"></script>
+<meta name="theme-color" content="#1F4E9A">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="../assets/brand/yalla-sa-mark-v6.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/fonts/fonts.css">
+<link rel="stylesheet" href="support.css">
+</head>
+<body>
+<!-- support inbox, WhatsApp and email (spec yalla-sa-support/docs/superpowers/specs/2026-11-18-whatsapp-design.md; approved image design/support-reference-v1.webp) -->
+<header class="top">
+  <a class="brand" href="/" aria-label="yalla-sa, לפורטל"><img src="../assets/brand/yalla-sa-mark-v6.svg" alt="" width="40" height="40"><span dir="ltr">yalla-sa</span></a>
+  <div class="top-end">
+    <span class="me"><span class="avatar" aria-hidden="true" id="meInit"></span><span id="meName"></span></span>
+    <a class="btn-outline" href="/">חזרה לפורטל <span aria-hidden="true">←</span></a>
+  </div>
+</header>
+
+<main id="app" hidden>
+  <div class="page-head">
+    <h1>שירות לקוחות</h1>
+    <button class="btn-text" id="btnSettings" type="button" hidden>הגדרות</button>
+  </div>
+  <div class="inbox" id="inbox">
+    <section class="list" id="listPane" aria-label="רשימת שיחות">
+      <div class="tabs" role="tablist" id="tabs">
+        <button role="tab" data-tab="open" aria-selected="true">פתוחות <b class="cnt" id="cOpen"></b></button>
+        <button role="tab" data-tab="assigned" aria-selected="false">בטיפול <b class="cnt" id="cAssigned"></b></button>
+        <button role="tab" data-tab="closed" aria-selected="false">סגורות</button>
+      </div>
+      <label class="search"><span class="sr">חיפוש</span>
+        <input id="q" type="search" placeholder="חיפוש לפי שם, מספר, מייל או נושא" autocomplete="off"></label>
+      <ul class="rows" id="rows"></ul>
+      <p class="empty muted" id="listEmpty" hidden>אין שיחות כאן</p>
+    </section>
+
+    <section class="thread" id="threadPane" aria-label="שיחה">
+      <div class="thread-none muted" id="threadNone">בחר שיחה מהרשימה</div>
+      <div class="thread-in" id="threadIn" hidden>
+        <div class="th-head">
+          <button class="back" id="btnBack" type="button" aria-label="חזרה לרשימה">›</button>
+          <div class="who"><h2 id="thName"></h2><span class="num" dir="ltr" id="thNum"></span><span class="subj" id="thSubj" dir="auto" hidden></span></div>
+          <span class="chan" id="thChan"></span>
+          <span class="chip" id="thChip"></span>
+          <div class="th-actions">
+            <div class="menu-wrap">
+              <button class="btn-outline sm" id="btnAssign" type="button" aria-haspopup="menu" aria-expanded="false">שיוך <span aria-hidden="true">▾</span></button>
+              <ul class="menu" id="assignMenu" role="menu" hidden></ul>
+            </div>
+            <button class="btn-outline sm" id="btnClose" type="button">סגירת פנייה</button>
+            <div class="menu-wrap">
+              <button class="btn-outline sm icon" id="btnMore" type="button" aria-label="עוד פעולות" aria-haspopup="menu" aria-expanded="false">⋯</button>
+              <ul class="menu" id="moreMenu" role="menu" hidden>
+                <li><button role="menuitem" type="button" id="miRefresh">רענון</button></li>
+                <li hidden><button role="menuitem" type="button" id="miSpam">סימון כספאם</button></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <ol class="msgs" id="msgs" aria-live="polite"></ol>
+        <form class="composer" id="composer" autocomplete="off">
+          <div class="comp-row">
+            <label class="sr" for="reply">כתיבת תשובה</label>
+            <textarea id="reply" rows="1" placeholder="כתיבת תשובה…" maxlength="4096"></textarea>
+            <label class="btn-outline sm icon attach" id="attachLbl" title="שליחת קובץ"><span class="sr">שליחת קובץ</span>📎
+              <input type="file" id="file" hidden></label>
+            <button class="btn-primary" id="btnSend" type="submit">שליחה</button>
+          </div>
+          <p class="window muted" id="winLine"><span aria-hidden="true">ⓘ</span> <span id="winText"></span></p>
+          <p class="msg err" id="sendMsg" role="alert"></p>
+        </form>
+        <div class="closed-note" id="winClosed" hidden>
+          <span class="ic" aria-hidden="true">✆</span>
+          <p>עברו 24 שעות מההודעה האחרונה של הלקוח. אי אפשר לענות בוואטסאפ. אפשר לחזור ללקוח בטלפון או במייל.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- settings (platform admin) -->
+<dialog class="card-dlg" id="dlgSettings" aria-labelledby="setTitle">
+  <form id="setForm" method="dialog">
+    <div class="dlg-head"><h2 id="setTitle">הגדרות</h2><button class="x" type="button" id="setX" aria-label="סגירה">✕</button></div>
+    <section class="spend">
+      <h3>הוצאה החודש</h3>
+      <p class="big"><b id="spNow"></b> <span class="muted">מתוך</span> <span id="spCap"></span> <span class="pct" id="spPct"></span></p>
+      <div class="bar" role="progressbar" aria-labelledby="spNow" id="spBar"><i></i></div>
+      <p class="muted sm" id="spSplit"></p>
+    </section>
+    <div class="grid">
+      <label for="sCap">תקרה חודשית (₪)</label><input id="sCap" type="number" min="0" step="1" inputmode="numeric">
+      <span>התראות אליי</span>
+      <div class="seg" role="radiogroup" aria-label="התראות אליי" id="sChan">
+        <label><input type="radio" name="chan" value="push"><span>פוש מהאתר</span></label>
+        <label><input type="radio" name="chan" value="whatsapp"><span>וואטסאפ</span></label>
+        <label><input type="radio" name="chan" value="email"><span>מייל</span></label>
+        <label><input type="radio" name="chan" value="off"><span>כבוי</span></label>
+      </div>
+      <label for="sTo" id="rowTo">מספר להתראות</label><input id="sTo" type="tel" dir="ltr" placeholder="050-0000000">
+      <label for="sMail" id="rowMail" hidden>מייל להתראות</label><input id="sMail" type="email" dir="ltr" placeholder="name@example.com" autocomplete="email" hidden>
+      <span>שעות פעילות</span>
+      <div class="hours">
+        <span class="muted" id="sDays">א׳–ה׳</span>
+        <input id="sFrom" type="time" aria-label="משעה"> – <input id="sTo2" type="time" aria-label="עד שעה">
+      </div>
+    </div>
+    <p class="muted sm" id="chanNote" hidden>כל נציג מפעיל התראות פעם אחת בכל מכשיר: בפורטל, בתפריט שתחת השם, "הפעל התראות על פניות".</p>
+    <h3>תשובות מוכנות</h3>
+    <div class="answers" id="answers"></div>
+    <p class="msg" id="setMsg" role="status"></p>
+    <div class="dlg-foot"><button class="btn-primary" id="setSave" type="submit">שמירה</button></div>
+  </form>
+</dialog>
+
+<!-- two-step code (aal2): support data is personal data -->
+<dialog class="card-dlg narrow" id="dlgStep" aria-labelledby="stTitle">
+  <form id="stepForm">
+    <h2 id="stTitle">קוד אימות</h2>
+    <p class="muted">הפניות כוללות מידע אישי. הקלד את הקוד מאפליקציית האימות.</p>
+    <label class="sr" for="stOtp">קוד בן 6 ספרות</label>
+    <input id="stOtp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" dir="ltr" class="otp">
+    <p class="msg" id="stMsg" role="alert"></p>
+    <div class="dlg-foot"><button class="btn-primary" type="submit" id="stOk">אישור</button></div>
+  </form>
+</dialog>
+
+<div class="state" id="state" role="status"><p id="stateText">טוען…</p><p id="stateAct"></p></div>
+
+<script src="../assets/auth-settings.js"></script>
+<script src="support.js"></script>
+</body>
+</html>
