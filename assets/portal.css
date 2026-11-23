@@ -148,6 +148,7 @@ button,input,select{font:inherit;color:inherit}
 .cp-btn{display:flex;align-items:center;gap:8px;height:40px;padding:0 14px;border:1.5px solid var(--ys-primary);border-radius:8px;background:#fff;color:var(--ys-primary);font-weight:700;cursor:pointer;white-space:nowrap}
 .cp-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
 .cp-btn[aria-pressed="true"]{background:var(--ys-tint)}
+a.cp-btn{text-decoration:none} a.cp-btn:hover{background:var(--ys-tint)}
 .cp-shade{position:fixed;inset:72px 0 0 0;background:rgba(29,35,48,.38);z-index:20}
 /* a screen of its own (David 2026-11-19): in the page flow under the top bar, the page scrolls, back = the logo */
 .cp{position:static;width:100%;min-width:0;max-width:1280px;margin:0 auto;background:transparent;display:block;padding:22px 28px 48px;overflow:visible}
@@ -230,6 +231,7 @@ body.cp-open{overflow:auto}
 .codes{display:grid;grid-template-columns:repeat(2,max-content);gap:6px 24px;font:600 18px Consolas,monospace;margin:10px 0}
 @media (max-width:640px){
   .top .cp-btn{padding:0 10px;height:36px;font-size:14px}
+  #supportBtn .sup-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* phone: icon only */
   .cp-shade{inset:60px 0 0 0}
   .cp{padding:14px 14px 32px}
   .cp-head h2{font-size:22px}

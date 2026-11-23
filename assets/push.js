@@ -60,7 +60,9 @@ else {
   window.pushSetup = async () => {
     try {
       if (!(await sb("/rest/v1/rpc/support_is_agent", { method: "POST", body: "{}" }))) return;
-      document.getElementById("supportItem").hidden = false; // link to the support inbox (/support/)
+      // links to the support inbox (/support/): a square in the top bar (David 23.11) and an item in the user menu
+      document.getElementById("supportBtn").hidden = false;
+      document.getElementById("supportItem").hidden = false;
       document.getElementById("pushItem").hidden = false;
       const e = await draw();
       if (e.sub && e.permission === "granted") send(e.sub).catch(() => {});
@@ -73,4 +75,7 @@ else {
     try { act === "on" ? await turnOn() : await turnOff(); await draw(); }
     catch (err) { console.warn("push", err); note.textContent = "לא הצלחנו להפעיל התראות. נסה שוב"; btn.disabled = false; }
   });
+  // the portal may open before this file has loaded (showPortal then skips pushSetup): catch up once
+  const pt = document.getElementById("portal");
+  if (pt && !pt.hidden) window.pushSetup();
 }
