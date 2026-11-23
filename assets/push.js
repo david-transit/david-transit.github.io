@@ -60,6 +60,7 @@ else {
   window.pushSetup = async () => {
     try {
       if (!(await sb("/rest/v1/rpc/support_is_agent", { method: "POST", body: "{}" }))) return;
+      document.getElementById("supportItem").hidden = false; // link to the support inbox (/support/)
       document.getElementById("pushItem").hidden = false;
       const e = await draw();
       if (e.sub && e.permission === "granted") send(e.sub).catch(() => {});

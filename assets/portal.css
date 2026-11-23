@@ -69,7 +69,7 @@ button,input,select{font:inherit;color:inherit}
 .menu{position:absolute;top:calc(100% + 8px);left:0;min-width:220px;background:#fff;border:1px solid var(--ys-line);border-radius:var(--r);box-shadow:0 10px 30px rgba(29,35,48,.12);padding:6px;z-index:10}
 .menu-head{display:flex;flex-direction:column;padding:8px 10px 10px;border-bottom:1px solid var(--ys-line);margin-bottom:4px;font-size:14px}
 .menu-head span{color:var(--ys-muted);text-align:right}
-.menu-item{display:block;width:100%;text-align:right;background:none;border:0;padding:9px 10px;border-radius:6px;cursor:pointer}
+.menu-item{display:block;color:inherit;text-decoration:none;font:inherit;width:100%;text-align:right;background:none;border:0;padding:9px 10px;border-radius:6px;cursor:pointer}
 .menu-item:hover,.menu-item:focus-visible{background:var(--ys-bg)}
 .menu-item:disabled{cursor:default;color:var(--ys-muted,#6b7280)}
 .menu-note{margin:0 10px 6px;font-size:13px;color:var(--ys-muted,#6b7280);max-width:240px}
