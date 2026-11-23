@@ -10,7 +10,7 @@ self.addEventListener("push", (e) => {
   e.waitUntil(self.registration.showNotification(d.title || "יאללה־סע", {
     body: d.body || "נכנסה פנייה חדשה לטיפול",
     icon: "/assets/app/icon-192.png",
-    badge: "/assets/app/icon-192.png",
+    badge: "/assets/app/badge-96.png", // white on transparent: Android shows only the shape
     lang: "he", dir: "rtl", tag: "support", renotify: true,
     data: { url: typeof d.url === "string" && d.url.startsWith("/") ? d.url : "/support/" },
   }));
