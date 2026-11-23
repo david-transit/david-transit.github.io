@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="support.css">
 </head>
 <body>
-<!-- inbox for WhatsApp support (spec yalla-sa-support/docs/superpowers/specs/2026-11-18-whatsapp-design.md; approved image design/support-reference-v1.webp) -->
+<!-- support inbox, WhatsApp and email (spec yalla-sa-support/docs/superpowers/specs/2026-11-18-whatsapp-design.md; approved image design/support-reference-v1.webp) -->
 <header class="top">
   <a class="brand" href="/" aria-label="yalla-sa, לפורטל"><img src="../assets/brand/yalla-sa-mark-v6.svg" alt="" width="40" height="40"><span dir="ltr">yalla-sa</span></a>
   <div class="top-end">
@@ -36,7 +36,7 @@
         <button role="tab" data-tab="closed" aria-selected="false">סגורות</button>
       </div>
       <label class="search"><span class="sr">חיפוש</span>
-        <input id="q" type="search" placeholder="חיפוש לפי שם או מספר" autocomplete="off"></label>
+        <input id="q" type="search" placeholder="חיפוש לפי שם, מספר, מייל או נושא" autocomplete="off"></label>
       <ul class="rows" id="rows"></ul>
       <p class="empty muted" id="listEmpty" hidden>אין שיחות כאן</p>
     </section>
@@ -46,7 +46,8 @@
       <div class="thread-in" id="threadIn" hidden>
         <div class="th-head">
           <button class="back" id="btnBack" type="button" aria-label="חזרה לרשימה">›</button>
-          <div class="who"><h2 id="thName"></h2><span class="num" dir="ltr" id="thNum"></span></div>
+          <div class="who"><h2 id="thName"></h2><span class="num" dir="ltr" id="thNum"></span><span class="subj" id="thSubj" dir="auto" hidden></span></div>
+          <span class="chan" id="thChan"></span>
           <span class="chip" id="thChip"></span>
           <div class="th-actions">
             <div class="menu-wrap">
@@ -58,6 +59,7 @@
               <button class="btn-outline sm icon" id="btnMore" type="button" aria-label="עוד פעולות" aria-haspopup="menu" aria-expanded="false">⋯</button>
               <ul class="menu" id="moreMenu" role="menu" hidden>
                 <li><button role="menuitem" type="button" id="miRefresh">רענון</button></li>
+                <li hidden><button role="menuitem" type="button" id="miSpam">סימון כספאם</button></li>
               </ul>
             </div>
           </div>
@@ -67,7 +69,7 @@
           <div class="comp-row">
             <label class="sr" for="reply">כתיבת תשובה</label>
             <textarea id="reply" rows="1" placeholder="כתיבת תשובה…" maxlength="4096"></textarea>
-            <label class="btn-outline sm icon attach" title="שליחת קובץ"><span class="sr">שליחת קובץ</span>📎
+            <label class="btn-outline sm icon attach" id="attachLbl" title="שליחת קובץ"><span class="sr">שליחת קובץ</span>📎
               <input type="file" id="file" hidden></label>
             <button class="btn-primary" id="btnSend" type="submit">שליחה</button>
           </div>
@@ -97,18 +99,20 @@
       <label for="sCap">תקרה חודשית (₪)</label><input id="sCap" type="number" min="0" step="1" inputmode="numeric">
       <span>התראות אליי</span>
       <div class="seg" role="radiogroup" aria-label="התראות אליי" id="sChan">
+        <label><input type="radio" name="chan" value="push"><span>פוש מהאתר</span></label>
         <label><input type="radio" name="chan" value="whatsapp"><span>וואטסאפ</span></label>
         <label><input type="radio" name="chan" value="email"><span>מייל</span></label>
         <label><input type="radio" name="chan" value="off"><span>כבוי</span></label>
       </div>
-      <label for="sTo">מספר להתראות</label><input id="sTo" type="tel" dir="ltr" placeholder="050-0000000">
+      <label for="sTo" id="rowTo">מספר להתראות</label><input id="sTo" type="tel" dir="ltr" placeholder="050-0000000">
+      <label for="sMail" id="rowMail" hidden>מייל להתראות</label><input id="sMail" type="email" dir="ltr" placeholder="name@example.com" autocomplete="email" hidden>
       <span>שעות פעילות</span>
       <div class="hours">
         <span class="muted" id="sDays">א׳–ה׳</span>
         <input id="sFrom" type="time" aria-label="משעה"> – <input id="sTo2" type="time" aria-label="עד שעה">
       </div>
     </div>
-    <p class="muted sm" id="chanNote" hidden>התראות במייל יעבדו אחרי הקמת תיבת המייל. עד אז לא תישלח התראה.</p>
+    <p class="muted sm" id="chanNote" hidden>כל נציג מפעיל התראות פעם אחת בכל מכשיר: בפורטל, בתפריט שתחת השם, "הפעל התראות על פניות".</p>
     <h3>תשובות מוכנות</h3>
     <div class="answers" id="answers"></div>
     <p class="msg" id="setMsg" role="status"></p>

@@ -1,7 +1,8 @@
 // yalla-sa support inbox (/support/). Spec: yalla-sa-support/docs/superpowers/specs/2026-11-18-whatsapp-design.md,
-// PRD R7–R13. Same sign-in as the portal (session key ys_session, durations from /assets/auth-settings.js).
+// PRD R7–R13; email inquiries: PRD-email M4–M8, M13, M15, M16 (spec 2026-11-18-email-design.md). Same sign-in as the portal (session key ys_session, durations from /assets/auth-settings.js).
 // Support data is personal data: RLS gives rows only to a support agent in an aal2 session, so the page asks for the
-// two-step code first. Every send goes through the Edge Function wa_send (rules are enforced there, not here).
+// two-step code first. Every send goes through an Edge Function (rules are enforced there, not here):
+// WhatsApp -> wa_send, email -> mail_send (no 24-hour window for email; attachments are read from the private bucket).
 "use strict";
 const SB = "https://xghfcdgettrcdciwwzbl.supabase.co", KEY = "sb_publishable_hCBsqYekz61JY6SFfT_sjw_-wj0QGXT";
 const SKEY = "ys_session", ACT = "ys_act", TRUST = "ys_trust";
@@ -57,9 +58,19 @@ async function sb(path, opt = {}, retry = true) {
 const rows = (t, qs) => sb(`/rest/v1/${t}?${qs}`);
 const rpc = (fn, args) => sb(`/rest/v1/rpc/${fn}`, { method: "POST", body: JSON.stringify(args || {}) });
 const authReq = async (method, path, body) => http(SB + "/auth/v1/" + path, { method, headers: { apikey: KEY, "Content-Type": "application/json", Authorization: "Bearer " + await token() }, ...(body ? { body: JSON.stringify(body) } : {}) });
-async function waSend(body, isForm) {
+async function fnSend(fn, body, isForm) {
   const headers = { apikey: KEY, Authorization: "Bearer " + await token(), ...(isForm ? {} : { "Content-Type": "application/json" }) };
-  return http(SB + "/functions/v1/wa_send", { method: "POST", headers, body: isForm ? body : JSON.stringify(body) }, 90000);
+  return http(SB + "/functions/v1/" + fn, { method: "POST", headers, body: isForm ? body : JSON.stringify(body) }, 90000);
+}
+const waSend = (body, isForm) => fnSend("wa_send", body, isForm);
+const mailSend = body => fnSend("mail_send", body);
+// an email attachment: read with the agent's own session (Storage RLS: agent + aal2), then saved under its real name
+async function download(path, name) {
+  const r = await fetch(SB + "/storage/v1/object/authenticated/support-attachments/" + path.split("/").map(encodeURIComponent).join("/"),
+    { headers: { apikey: KEY, Authorization: "Bearer " + await token() } });
+  if (!r.ok) { const e = new Error(r.status === 400 || r.status === 404 ? "not_found" : "שגיאה " + r.status); e.status = r.status; throw e }
+  const url = URL.createObjectURL(await r.blob()), a = document.createElement("a");
+  a.href = url; a.download = name || "file"; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 const jwtOf = t => { try { return JSON.parse(atob(String(t).split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) } catch { return {} } };
 const aal = () => SES ? jwtOf(SES.access_token).aal : null;
@@ -74,6 +85,8 @@ const ERR = {
   window_closed: "עברו 24 שעות מההודעה האחרונה של הלקוח. אפשר לחזור אליו בטלפון או במייל",
   opted_out: "הלקוח ביקש לא לקבל הודעות", budget_exceeded: "התקציב החודשי נוצל",
   too_large: "הקובץ גדול מדי", empty: "הקובץ ריק", not_configured: "וואטסאפ עוד לא מחובר", not_allowed: "אין לך הרשאה לפעולה הזו",
+  send_failed: "המייל לא נשלח. נסה שוב בעוד כמה דקות", quota: "מכסת המיילים היומית נוצלה. נסה שוב מחר",
+  need_mail: "כדי לקבל התראות במייל צריך להקליד כתובת מייל", need_phone: "כדי לקבל התראות בוואטסאפ צריך להקליד מספר",
   mfa_required: "צריך להקליד שוב את קוד האימות", not_found: "השיחה לא נמצאה", bad_input: "הנתונים לא תקינים",
   "Invalid TOTP code": "הקוד שגוי או שפג תוקפו", mfa_verification_failed: "הקוד שגוי או שפג תוקפו",
   "Failed to fetch": "אין חיבור לשרת. בדוק את החיבור לאינטרנט ונסה שוב", "rate limit": "יותר מדי ניסיונות. נסה שוב בעוד כמה דקות",
@@ -103,7 +116,12 @@ const initial = s => (String(s || "").trim()[0] || "+");
 
 // ---------- state ----------
 let ME = null, PLATFORM = false, AGENTS = {}, CONVS = [], LAST = {}, TAB = "open", SEL = null, MSGS = [], SETTINGS = null, ANSWERS = [];
-const contactName = c => c.support_contacts?.wa_name || fmtPhone(c.support_contacts?.wa_id);
+const isMail = c => !!c && c.channel === "email";
+// display name: WhatsApp name or email name; without one, the number or the address (read left to right)
+const namedOf = c => (isMail(c) ? c.support_contacts?.email_name : c.support_contacts?.wa_name) || "";
+const addrOf = c => isMail(c) ? (c.support_contacts?.email || "") : fmtPhone(c.support_contacts?.wa_id);
+const contactName = c => namedOf(c) || addrOf(c);
+const CHAN = { email: "מייל", whatsapp: "וואטסאפ" };
 const agentName = id => AGENTS[id] || "נציג";
 
 // ---------- boot ----------
@@ -158,7 +176,7 @@ async function loadAgents() {
 }
 async function loadList() {
   const [cv, last] = await Promise.all([
-    rows("support_conversations", "select=id,status,assignee,last_inbound_at,created_at,closed_at,support_contacts(wa_id,wa_name)&order=created_at.desc&limit=300"),
+    rows("support_conversations", "select=id,status,assignee,last_inbound_at,created_at,closed_at,channel,subject,support_contacts(wa_id,wa_name,email,email_name)&order=created_at.desc&limit=300"),
     rows("support_messages", "select=conversation_id,direction,body,created_at&conversation_id=not.is.null&order=created_at.desc&limit=600")]);
   CONVS = cv; LAST = {};
   for (const m of last) if (!LAST[m.conversation_id]) LAST[m.conversation_id] = m;
@@ -167,7 +185,7 @@ async function loadList() {
 }
 async function loadThread() {
   if (!SEL) return;
-  MSGS = await rows("support_messages", "select=id,direction,sender,agent_id,body,template,status,error,created_at&conversation_id=eq." + SEL + "&order=created_at.asc&limit=500");
+  MSGS = await rows("support_messages", "select=id,direction,sender,agent_id,body,template,status,error,created_at,channel,attachments&conversation_id=eq." + SEL + "&order=created_at.asc&limit=500");
   drawThread();
 }
 // RLS answers an aal1 session with empty lists, not an error: check the session first, so a code that was lost
@@ -184,17 +202,18 @@ function drawList() {
   const q = $("#q").value.trim().toLowerCase().replace(/[\s+-]/g, "");
   const count = s => CONVS.filter(c => c.status === s).length;
   $("#cOpen").textContent = count("open") || ""; $("#cAssigned").textContent = count("assigned") || "";
-  const list = CONVS.filter(c => c.status === TAB).filter(c => !q ||
-    String(c.support_contacts?.wa_name || "").toLowerCase().includes(q) || String(c.support_contacts?.wa_id || "").includes(q.replace(/^0/, "972")));
+  const has = v => String(v || "").toLowerCase().replace(/[\s+-]/g, "").includes(q);
+  const list = CONVS.filter(c => c.status === TAB).filter(c => !q || has(namedOf(c)) || has(c.support_contacts?.email) || has(c.subject) ||
+    String(c.support_contacts?.wa_id || "").includes(q.replace(/^0/, "972")));
   $("#rows").innerHTML = list.map(c => {
     const l = LAST[c.id], unread = l && l.direction === "in" && c.status !== "closed";
     const handler = c.status === "assigned" ? (c.assignee ? agentName(c.assignee) : "בתור") : STATUS_HE[c.status];
     return `<li><button class="row" type="button" data-id="${c.id}" aria-current="${c.id === SEL}">
-      <span class="ini" aria-hidden="true">${esc(initial(c.support_contacts?.wa_name))}</span>
-      <span class="nm${c.support_contacts?.wa_name ? "" : ' num-only'}" ${c.support_contacts?.wa_name ? "" : 'dir="ltr"'}>${esc(contactName(c))}</span>
+      <span class="ini${isMail(c) ? " mail" : ""}" aria-hidden="true">${esc(isMail(c) ? initial(contactName(c)).toUpperCase() : initial(namedOf(c)))}</span>
+      <span class="nm${namedOf(c) ? "" : ' num-only'}" ${namedOf(c) ? "" : 'dir="ltr"'}>${esc(contactName(c))}</span>
       <span class="tm">${unread ? '<i class="dot" aria-label="הודעה חדשה"></i>' : ""}${esc(fmtTime(l?.created_at || c.created_at))}</span>
-      <span class="pv">${esc(l?.body || "")}</span>
-      <span class="hd chip">${esc(handler)}</span></button></li>`;
+      <span class="pv">${isMail(c) && c.subject ? `<b>${esc(c.subject)}</b> · ` : ""}${esc(l?.body || "")}</span>
+      <span class="hd"><span class="chan ${isMail(c) ? "mail" : "wa"}">${CHAN[c.channel] || CHAN.whatsapp}</span><span class="chip">${esc(handler)}</span></span></button></li>`;
   }).join("");
   $("#listEmpty").hidden = list.length > 0;
 }
@@ -216,13 +235,24 @@ $("#btnBack").addEventListener("click", () => { $("#inbox").classList.remove("sh
 const conv = () => CONVS.find(c => c.id === SEL);
 function drawHead() {
   const c = conv(); $("#threadNone").hidden = !!c; $("#threadIn").hidden = !c; if (!c) return;
-  $("#thName").textContent = c.support_contacts?.wa_name || fmtPhone(c.support_contacts?.wa_id);
-  $("#thName").dir = c.support_contacts?.wa_name ? "auto" : "ltr"; // a bare number reads left to right
-  $("#thNum").textContent = c.support_contacts?.wa_name ? fmtPhone(c.support_contacts?.wa_id) : "";
+  const mail = isMail(c);
+  $("#thName").textContent = contactName(c);
+  $("#thName").dir = namedOf(c) ? "auto" : "ltr"; // a bare number or address reads left to right
+  $("#thNum").textContent = namedOf(c) ? addrOf(c) : "";
+  $("#thSubj").hidden = !(mail && c.subject); $("#thSubj").textContent = mail && c.subject ? c.subject : "";
+  $("#thChan").textContent = CHAN[c.channel] || CHAN.whatsapp; $("#thChan").className = "chan " + (mail ? "mail" : "wa");
+  $("#miSpam").parentElement.hidden = !mail || c.status === "closed";
   const chip = $("#thChip");
   chip.textContent = c.status === "assigned" ? `בטיפול · ${c.assignee ? agentName(c.assignee) : "בתור"}` : STATUS_HE[c.status];
   chip.className = "chip" + (c.status === "assigned" ? " blue" : "");
   $("#btnClose").textContent = c.status === "closed" ? "פתיחה מחדש" : "סגירת פנייה";
+  $("#attachLbl").hidden = mail; // mail_send sends text replies only
+  $("#reply").maxLength = mail ? 20000 : 4096;
+  if (mail) { // email has no 24-hour window (M8): a reply can go out any time while the inquiry is not closed
+    $("#composer").hidden = c.status === "closed"; $("#winClosed").hidden = true;
+    $("#winText").textContent = "התשובה תישלח במייל מהכתובת support@yalla-sa.app";
+    return;
+  }
   const left = c.last_inbound_at ? WINDOW_MS - (Date.now() - new Date(c.last_inbound_at)) : -1;
   const open = left > 0 && c.status !== "closed";
   $("#composer").hidden = !open; $("#winClosed").hidden = open || c.status === "closed";
@@ -231,6 +261,7 @@ function drawHead() {
 function ticks(m) {
   if (m.direction !== "out") return "";
   if (m.status === "failed") return "";
+  if (m.channel === "email") return m.status === "queued" ? '<span class="ticks">⏱ ממתין לשליחה</span>' : '<span class="ticks" aria-label="נשלח">✓</span>';
   return m.status === "read" ? '<span class="ticks read" aria-label="נקראה">✓✓</span>'
     : m.status === "delivered" ? '<span class="ticks" aria-label="נמסרה">✓✓</span>'
     : m.status === "sent" ? '<span class="ticks" aria-label="נשלחה">✓</span>' : '<span class="ticks" aria-label="בשליחה">⏱</span>';
@@ -241,14 +272,30 @@ function drawThread() {
   el.innerHTML = MSGS.map(m => {
     const cls = m.direction === "in" ? "in" : m.sender === "bot" ? "out bot" : "out";
     const label = m.direction === "in" ? "" : m.sender === "bot" ? "בוט" : m.sender === "system" ? "מערכת" : agentName(m.agent_id);
-    const failed = m.status === "failed";
-    return `<li class="b ${cls}">${label ? `<span class="who-l">${esc(label)}</span>` : ""}${m.template ? `<span class="tpl">הודעה מוכנה: ${esc(m.template)}</span>` : ""}<span class="tx">${esc(m.body)}</span><span class="meta">${failed ? '<span class="fail">⚠ לא נשלחה</span>' : ""}${ticks(m)}<span>${clock(m.created_at)}</span></span>
-      ${failed && !m.template && !String(m.body || "").startsWith("📎") ? `<button class="resend" type="button" data-id="${m.id}">שליחה שוב</button>` : ""}</li>`;
+    const failed = m.status === "failed", mail = m.channel === "email";
+    const failText = !failed ? "" : mail ? (m.error === "bounced" ? "⚠ המייל חזר ולא נמסר" : "⚠ המייל לא נשלח") : "⚠ לא נשלחה";
+    return `<li class="b ${cls}">${label ? `<span class="who-l">${esc(label)}</span>` : ""}${m.template ? `<span class="tpl">הודעה מוכנה: ${esc(m.template)}</span>` : ""}<span class="tx">${esc(m.body)}</span>${files(m)}<span class="meta">${failed ? `<span class="fail">${failText}</span>` : ""}${ticks(m)}<span>${dayClock(m.created_at)}</span></span>
+      ${failed && !mail && !m.template && !String(m.body || "").startsWith("📎") ? `<button class="resend" type="button" data-id="${m.id}">שליחה שוב</button>` : ""}</li>`;
   }).join("");
   if (atEnd || !el.dataset.sel || el.dataset.sel !== SEL) el.scrollTop = el.scrollHeight;
   el.dataset.sel = SEL || "";
 }
+// email attachments (M6): a list of {name,size,type,path}, or {dropped:n} when the mail was over 10MB
+const kb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + "MB" : Math.max(1, Math.round(n / 1024)) + "KB";
+function files(m) {
+  const a = m.attachments; if (!a) return "";
+  if (!Array.isArray(a)) return a.dropped ? '<span class="dropped">במייל היו קבצים מעל 10MB. הם לא נשמרו.</span>' : "";
+  return a.length ? `<span class="files">${a.map(f => `<button class="file" type="button" data-path="${esc(f.path)}" data-name="${esc(f.name)}"><span aria-hidden="true">📎</span> <span dir="auto">${esc(f.name)}</span> <span class="muted" dir="ltr">${kb(+f.size || 0)}</span></button>`).join("")}</span>` : "";
+}
+// email threads can be long: older messages show the day too
+const dayClock = iso => { const f = fmtTime(iso); return f.includes(":") ? f : `${f} ${clock(iso)}` };
 $("#msgs").addEventListener("click", async e => {
+  const f = e.target.closest(".file");
+  if (f) {
+    f.disabled = true;
+    try { await withAal(() => download(f.dataset.path, f.dataset.name)) } catch (err) { $("#sendMsg").textContent = errText(err) } finally { f.disabled = false }
+    return;
+  }
   const b = e.target.closest(".resend"); if (!b) return; b.disabled = true;
   try { await withAal(() => waSend({ action: "resend", message: b.dataset.id })); await loadThread() }
   catch (err) { $("#sendMsg").textContent = errText(err); b.disabled = false }
@@ -261,8 +308,12 @@ reply.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey &&
 $("#composer").addEventListener("submit", async e => {
   e.preventDefault(); const body = reply.value.trim(); if (!body || !SEL) return;
   const m = $("#sendMsg"); m.textContent = ""; $("#btnSend").disabled = true;
-  try { await withAal(() => waSend({ action: "reply", conversation: SEL, body })); reply.value = ""; reply.style.height = ""; await poll() }
-  catch (err) { m.textContent = errText(err) } finally { $("#btnSend").disabled = false; reply.focus() }
+  try {
+    const r = await withAal(() => (isMail(conv()) ? mailSend : waSend)({ action: "reply", conversation: SEL, body }));
+    reply.value = ""; reply.style.height = "";
+    if (r && r.queued) m.textContent = "מכסת המיילים היומית נוצלה. התשובה תישלח מחר";
+    await poll();
+  } catch (err) { m.textContent = errText(err) } finally { $("#btnSend").disabled = false; reply.focus() }
 });
 $("#file").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f || !SEL) return;
@@ -294,6 +345,13 @@ $("#assignMenu").addEventListener("click", async e => {
 $("#btnClose").addEventListener("click", () => { const c = conv(); if (c) setStatus(c.status === "closed" ? "open" : "closed", c.status === "closed" ? null : c.assignee) });
 $("#btnMore").addEventListener("click", () => toggleMenu($("#btnMore"), $("#moreMenu")));
 $("#miRefresh").addEventListener("click", () => { toggleMenu($("#btnMore"), $("#moreMenu"), false); poll() });
+// M7: spam closes the inquiry; later mail from this sender opens nothing and alerts no one
+$("#miSpam").addEventListener("click", async () => {
+  toggleMenu($("#btnMore"), $("#moreMenu"), false); const c = conv(); if (!isMail(c)) return;
+  if (!confirm(`לסמן את ${contactName(c)} כספאם? הפנייה תיסגר, ומיילים נוספים מהשולח הזה לא ייכנסו לתיבה.`)) return;
+  try { await withAal(() => rpc("support_mark_spam", { p_conv: SEL })); await loadList(); drawHead() }
+  catch (e) { $("#sendMsg").textContent = errText(e) }
+});
 async function setStatus(status, assignee) {
   try { await withAal(() => rpc("support_set_status", { p_conv: SEL, p_status: status, p_assignee: assignee })); await loadList(); drawHead() }
   catch (e) { $("#sendMsg").textContent = errText(e) }
@@ -316,7 +374,8 @@ async function openSettings() {
     $("#spSplit").textContent = `וואטסאפ ₪${sum("meta").toFixed(2)} · בוט חכם ₪${sum("ai").toFixed(2)}`;
     $("#sCap").value = cap;
     for (const r of document.querySelectorAll('[name=chan]')) r.checked = r.value === SETTINGS.alert_channel;
-    $("#chanNote").hidden = SETTINGS.alert_channel !== "email";
+    showChan(SETTINGS.alert_channel);
+    $("#sMail").value = SETTINGS.alert_email || "";
     $("#sTo").value = SETTINGS.alert_to ? "0" + String(SETTINGS.alert_to).replace(/^972/, "") : "";
     $("#sFrom").value = SETTINGS.hours?.from || "08:00"; $("#sTo2").value = SETTINGS.hours?.to || "17:00";
     const TITLES = { "1": "1 – בעיה בכניסה", "2": "2 – שאלה על הכלי", hours_off: "מחוץ לשעות הפעילות" };
@@ -327,14 +386,24 @@ async function openSettings() {
   } catch (e) { alertMsg(errText(e)) }
 }
 function alertMsg(t) { $("#sendMsg").textContent = t }
-document.querySelectorAll("[name=chan]").forEach(r => r.addEventListener("change", () => { $("#chanNote").hidden = r.value !== "email" || !r.checked }));
+// each channel shows only its own field; push needs none (each agent turns it on per device, in the portal's user menu)
+function showChan(v) {
+  for (const id of ["#rowTo", "#sTo"]) $(id).hidden = v !== "whatsapp";
+  for (const id of ["#rowMail", "#sMail"]) $(id).hidden = v !== "email";
+  $("#chanNote").hidden = v !== "push";
+}
+document.querySelectorAll("[name=chan]").forEach(r => r.addEventListener("change", () => { if (r.checked) showChan(r.value) }));
 $("#setForm").addEventListener("submit", async e => {
   e.preventDefault(); const m = $("#setMsg"); m.className = "msg"; m.textContent = "שומר…"; $("#setSave").disabled = true;
   try {
     const raw = $("#sTo").value.replace(/\D/g, ""), to = raw ? (raw.startsWith("0") ? "972" + raw.slice(1) : raw) : "";
     if (to && !/^\d{10,15}$/.test(to)) throw new Error("bad_input");
     const chan = document.querySelector("[name=chan]:checked")?.value || SETTINGS.alert_channel;
-    await withAal(() => rpc("support_save_settings", { p: { monthly_cap_ils: +$("#sCap").value || 0, alert_channel: chan, alert_to: to,
+    const mail = $("#sMail").value.trim().toLowerCase();
+    if (mail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) throw new Error("bad_input");
+    if (chan === "email" && !mail) throw new Error("need_mail");
+    if (chan === "whatsapp" && !to) throw new Error("need_phone");
+    await withAal(() => rpc("support_save_settings", { p: { monthly_cap_ils: +$("#sCap").value || 0, alert_channel: chan, alert_to: to, alert_email: mail,
       hours: { ...(SETTINGS.hours || {}), days: SETTINGS.hours?.days || [0, 1, 2, 3, 4], from: $("#sFrom").value || "08:00", to: $("#sTo2").value || "17:00" } } }));
     for (const t of document.querySelectorAll("#answers textarea")) {
       const old = ANSWERS.find(a => a.key === t.dataset.key)?.body; const v = t.value.trim();

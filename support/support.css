@@ -140,3 +140,17 @@ h1{font-size:30px;margin:0;font-weight:700}
   .b{max-width:88%}
   .grid{grid-template-columns:1fr}
 }
+
+/* email (PRD-email M4: an email inquiry is marked "מייל"; M6 attachments) */
+.chan{display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;font-weight:500;white-space:nowrap;border:1px solid var(--ys-line);color:var(--ys-muted);background:#fff}
+.chan.mail{border-color:#D6E3F7;color:var(--ys-primary);background:var(--ys-tint)}
+.row .hd{display:flex;gap:6px;align-items:center}
+.row .ini.mail{background:var(--ys-tint);color:var(--ys-primary)}
+.row .pv b{color:var(--ys-text);font-weight:500}
+.who .subj{display:block;font-size:14px;font-weight:500;color:var(--ys-text);overflow-wrap:anywhere}
+.b .files{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.b .file{display:inline-flex;gap:6px;align-items:center;max-width:100%;padding:4px 10px;border:1px solid var(--ys-line);border-radius:6px;background:#fff;color:var(--ys-primary);cursor:pointer;font-size:13px}
+.b .file span[dir=auto]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+.b .file:disabled{opacity:.6;cursor:progress}
+.b .dropped{display:block;margin-top:6px;font-size:13px;color:var(--ys-warn)}
+.grid input[type=email]{height:40px;border:1px solid var(--ys-line);border-radius:var(--r);padding:0 12px;max-width:280px}
